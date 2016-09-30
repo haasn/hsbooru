@@ -3,6 +3,8 @@
 import Control.Applicative ((<|>))
 import Control.Monad
 import Control.Monad.Fail
+import Control.Monad.Trans.Except
+import Control.Monad.IO.Class
 
 import Data.Time
 import Data.SafeCopy
@@ -10,17 +12,33 @@ import Data.Char (isNumber)
 import Data.List (find, isPrefixOf)
 import Data.Maybe (listToMaybe)
 
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as T
 
+import Network.Curl ( CurlCode(..), CurlOption(..)
+                    , CurlResponse_(..), curlGetResponse_ )
+
+import System.Directory (doesFileExist)
+import System.FilePath.Posix ((</>), takeFileName)
+
 import Text.Read (readMaybe)
-import Text.HTML.Scalpel
+import Text.HTML.Scalpel hiding (curlOpts)
+
+-- ^ Global configuration
+
+-- Directories
+dbDir     = "/z/booru/"
+imageDir  = dbDir </> "images"
+xapianDir = dbDir </> "xapian"
+
+curlOpts  = [CurlFollowLocation True]
 
 -- ^ Types and instances
 
 -- This is defined via SafeCopy so I can migrate to a newer version
 -- in the future
 
-data FileInfo = FileInfo { fileHash :: !T.Text } deriving Show
+data FileInfo = FileInfo { fileName :: !T.Text } deriving Show
 
 deriveSafeCopy 0 'base ''FileInfo
 
@@ -95,6 +113,10 @@ gelbooru = SiteScraper{..}
                     Just id -> return id
                     Nothing -> mzero
 
+          -- NOTE: gelbooru has a programmable API which would make
+          -- most of this easier, but unfortunately it has some limitations
+          -- so we're stuck with manually parsing the website if we want
+          -- all of the information..
           scrapeID postID = scrapeURL (postUrl ++ show postID) $ do
                 -- Extract the stats by parsing the list on the left
                 let stats = "div" @: ["id" @= "stats"] // "li"
@@ -123,4 +145,29 @@ gelbooru = SiteScraper{..}
           rssUrl = "http://gelbooru.com/index.php?page=cooliris"
           postUrl = "http://gelbooru.com/index.php?page=post&s=view&id="
 
--- TODO: image downloading, thumbnail generation (?), xapian integration, frontend
+-- ^ Image downloading and storing
+
+fetchImage :: URL -> ExceptT String IO FileInfo
+fetchImage url = do
+    -- Since we're working with direct links, we can extract the "filename"
+    -- from the URL as if it were a path. Kludgy, but works..
+    let fileName = takeFileName url
+        filePath = imageDir </> fileName
+        fileInfo = FileInfo { fileName = T.pack fileName }
+
+    e   <- liftIO $ doesFileExist filePath
+    unless e $ download url filePath
+
+    return fileInfo
+
+download :: URL -> FilePath -> ExceptT String IO ()
+download url path = do
+    res <- liftIO $ curlGetResponse_ url curlOpts
+    case res :: CurlResponse_ [(String, String)] LBS.ByteString of
+        CurlResponse { respCurlCode = CurlOK, respBody = img }
+            -> liftIO $ LBS.writeFile path img
+
+        CurlResponse { respCurlCode = err }
+            -> throwE $ show err
+
+-- TODO: thumbnail generation (?), xapian integration, frontend
