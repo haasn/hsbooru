@@ -26,6 +26,7 @@ import Network.Curl ( CurlCode(..), CurlOption(..)
 import Search.Xapian
 import System.Directory (doesFileExist)
 import System.FilePath.Posix ((</>), takeFileName)
+import System.IO
 
 import qualified Search.Xapian.Query.Combinators as Q
 
@@ -246,6 +247,29 @@ listFiles db q = do
     ds <- runXM $ xapianSearch db q allResults >>= mapM getData
     forM ds $ ExceptT . pure . runGet safeGet
 
+scrapeSiteFrom :: SiteScraper -> Int -> IO ()
+scrapeSiteFrom site@SiteScraper{..} from = do
+    maxID <- scrapeMax
+    case maxID of
+        Nothing  -> logError siteName "Failed retrieving maximum image ID"
+        Just max -> scrapeSiteFromTo site from max
+
+scrapeSiteFromTo :: SiteScraper -> Int -> Int -> IO ()
+scrapeSiteFromTo site@SiteScraper{..} from to = do
+    res <- runExceptT xapianRW
+    case res of
+        Left e   -> error e -- XXX: improve?
+        Right db -> forM_ [from..to] (go db)
+  where
+    go db id = do
+        res <- runExceptT $ processID db site id
+        case res of
+            Left e  -> logError siteName e
+            Right p -> putStrLn $ showPost p
+
+    showPost Post{..} = "["++siteName++"] " ++ show siteID ++ "/" ++ show to
+                     ++ " " ++ fileURL ++ " " ++ unwords (map tagName tags)
+
 -- Misc helpers
 
 requireJust :: String -> IO (Maybe a) -> ExceptT String IO a
@@ -253,6 +277,10 @@ requireJust err = maybe (throwE err) pure <=< liftIO
 
 requireRight :: Show e => IO (Either e a) -> ExceptT String IO a
 requireRight = either (throwE . show) pure <=< liftIO
+
+logError :: String -> String -> IO ()
+logError name err = do
+    hPutStrLn stderr $ "["++name++"] Error: " ++ err
 
 -- Prefix mapping
 
@@ -295,3 +323,6 @@ parseTerm str = head [ p:r | (p, ls) <- prefixFriendly
                      ]
 
 -- TODO: thumbnail generation (?), frontend
+
+-- XXX for testing
+main = scrapeSiteFromTo gelbooru 1280 10000
