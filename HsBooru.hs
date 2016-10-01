@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell, RecordWildCards, PatternSynonyms, ViewPatterns,
-             LambdaCase, TypeFamilies #-}
+             LambdaCase, TypeFamilies, TypeSynonymInstances, FlexibleInstances #-}
 
 import Prelude hiding (log)
 
@@ -8,7 +8,10 @@ import Control.Monad
 import Control.Monad.Fail
 import Control.Monad.Trans.Except
 import Control.Monad.IO.Class
+import Control.Monad.State (modify, gets)
+import Control.Monad.Reader (ask)
 
+import Data.Default
 import Data.Ix (inRange)
 import Data.Time
 import Data.SafeCopy
@@ -17,16 +20,20 @@ import Data.Char
 import Data.List (find, isPrefixOf)
 import Data.Maybe (maybeToList)
 
+import qualified Data.Acid as A
+import qualified Data.Map as M
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.UTF8 as UTF8
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as T
 
-import Network.Curl ( CurlCode(..), CurlOption(..)
-                    , CurlResponse_(..), curlGetResponse_ )
+import qualified Network.Curl as Curl
+import Network.Curl ( Curl(..), CurlCode(..), CurlOption(..)
+                    , CurlResponse_(..) )
 
 import Search.Xapian
 import System.Directory (doesFileExist)
+import System.Environment (getArgs)
 import System.FilePath.Posix ((</>), takeFileName)
 import System.IO
 
@@ -41,8 +48,13 @@ import Text.HTML.Scalpel hiding (curlOpts, scrape)
 dbDir       = "/z/booru/"
 imageDir    = dbDir </> "images"
 xapianDir   = dbDir </> "xapian"
+acidDir     = dbDir </> "acid"
+
+-- Used when downloading images
+curlOpts = [ CurlFollowLocation True ]
 
 -- Term prefix mapping, for reusable tags
+statePrefix    = "X"
 booruPrefix    = "B"
 uploaderPrefix = "U"
 ratingPrefix   = "R"
@@ -50,9 +62,11 @@ tagPrefix      = ""
 
 -- Because we're collecting post data separately from performing the actual
 -- downloading, we use tags to signal post state
-statePrefix    = "X"
-unprocessedTag = "todo"
-failedTag      = "failed"
+unprocessedTag = mkStateTag "todo"
+failedTag      = mkStateTag "failed"
+
+mkStateTag :: String -> BS.ByteString
+mkStateTag tag = UTF8.fromString $ statePrefix ++ tag
 
 -- Value mapping, for per-document unique identification
 siteIDSlot   = 0
@@ -83,6 +97,29 @@ data SiteScraper = SiteScraper
     , scrapePage :: Int -> IO (Maybe [Post])
     }
 
+-- Can't be a newtype due to overly strict nominal role constraints on SafeCopy
+type ScraperState = M.Map String Int
+
+-- ^ acid-state integration
+
+acidDB :: IO (A.AcidState ScraperState)
+acidDB = A.openLocalStateFrom acidDir M.empty
+
+activeSites :: A.Query ScraperState [String]
+activeSites = M.keys <$> ask
+
+recordMax :: String -> Int -> A.Update ScraperState ()
+recordMax k = modify . M.insertWith max k
+
+requireMax :: String -> A.Update ScraperState Int
+requireMax k = do
+    v <- gets $ M.lookup k
+    case v of
+        Nothing -> 0 <$ modify (M.insert k 0)
+        Just v' -> return v'
+
+A.makeAcidic ''ScraperState ['activeSites, 'recordMax, 'requireMax]
+
 -- ^ Scraper definitions
 
 -- Helper functions
@@ -101,6 +138,9 @@ chomp (x:xs) (y:ys)
 
 attrRead :: (Selectable s, Read a) => String -> s -> Scraper String a
 attrRead a = maybe mzero pure . readMaybe <=< attr a
+
+scrapers :: [SiteScraper]
+scrapers = [ gelbooru ]
 
 -- Gelbooru scraper
 gelbooru :: SiteScraper
@@ -135,33 +175,26 @@ gelbooru = SiteScraper{..}
 
                 return Post{..}
 
-          apiURL = "http://gelbooru.com/index.php?page=dapi&s=post&q=index&limit=100&pid="
+          apiURL = "http://gelbooru.com/index.php?page=dapi&s=post"++
+                   "&q=index&limit="++show pageSize++"&pid="
 
 -- ^ Image downloading and storing
 
-{-
-fetchImage :: URL -> ExceptT String IO FileInfo
-fetchImage url = do
-    -- Since we're working with direct links, we can extract the "filename"
-    -- from the URL as if it were a path. Kludgy, but works..
-    let fileName = takeFileName url
-        filePath = imageDir </> fileName
+requireImage :: Curl -> URL -> String -> ExceptT String IO ()
+requireImage curl url fileName = do
+    let filePath = imageDir </> fileName
+    e <- liftIO $ doesFileExist filePath
+    unless e $ download curl url filePath
 
-    e   <- liftIO $ doesFileExist filePath
-    unless e $ download url filePath
-
-    return FileInfo{..}
-
-download :: URL -> FilePath -> ExceptT String IO ()
-download url path = do
-    res <- liftIO $ curlGetResponse_ url curlOpts
+download :: Curl -> URL -> FilePath -> ExceptT String IO ()
+download curl url path = do
+    res <- liftIO $ Curl.do_curl_ curl url curlOpts
     case res :: CurlResponse_ [(String, String)] LBS.ByteString of
         CurlResponse { respCurlCode = CurlOK, respBody = img }
             -> liftIO $ LBS.writeFile path img
 
         CurlResponse { respCurlCode = err }
             -> throwE $ "Error downloading " ++ url ++ ": " ++ show err
--}
 
 -- ^ Xapian database integration
 
@@ -176,13 +209,15 @@ strVal :: Document -> ValueNumber -> String -> XapianM ()
 strVal doc val str = setValue val (UTF8.fromString sanitized) doc
     where sanitized = map toLower str
 
-encVal :: Serialize a => Document -> ValueNumber -> a -> XapianM ()
-encVal doc val num = setValue val (encode num) doc
+encVal :: Integral a => Document -> ValueNumber -> a -> XapianM ()
+encVal doc val num = do
+    enc <- io $ sortableSerialise (fromIntegral num)
+    setValue val enc doc
 
 xapianStore :: WritableDatabase db => db -> Post -> XapianM ()
 xapianStore db Post{..} = do
     doc <- emptyDocument
-    addTag doc statePrefix unprocessedTag
+    addTerm unprocessedTag doc
     setData (encode fileURL) doc
 
     encVal doc siteIDSlot siteID
@@ -203,13 +238,22 @@ xapianDB = requireRight $ openReadWrite CreateOrOpen xapianDir
 runXM :: XapianM a -> ExceptT String IO a
 runXM = io . runXapian
 
--- ^ Front-end routines for the primitives above
+-- ^ Mid-level wrappers for the above primitives
 
-scrapeSite :: SiteScraper -> Int -> Int -> Int -> ExceptT String IO ()
-scrapeSite SiteScraper{..} offset minID maxID = xapianDB >>= go startPage
-    where startPage = offset `div` pageSize
+data ScrapeRange = ScrapeRange
+    { startPage :: !Int
+    , minID :: !Int
+    , maxID :: !Int
+    }
 
-          go :: Int -> ReadWriteDB -> ExceptT String IO ()
+instance Default ScrapeRange where
+    def = ScrapeRange { startPage = 0, minID = minBound, maxID = maxBound }
+
+scrapeSiteWith :: SiteScraper -> A.AcidState ScraperState -> ScrapeRange
+               -> ExceptT String IO ()
+
+scrapeSiteWith SiteScraper{..} st ScrapeRange{..} = xapianDB >>= go startPage
+    where go :: Int -> ReadWriteDB -> ExceptT String IO ()
           go n db = do
             io.log siteName $ "Scraping page " ++ show n
             res <- io $ scrapePage n
@@ -217,6 +261,8 @@ scrapeSite SiteScraper{..} offset minID maxID = xapianDB >>= go startPage
             let process ps = case filter (inRange (minID, maxID) . siteID) ps of
                     [] -> io.log siteName $ "No new posts"
                     ps -> do runXM $ mapM_ (xapianStore db) ps >> commit db
+                             let m = maximum $ map siteID ps
+                             io $ A.update st (RecordMax siteName m)
                              mapM_ showPost ps
                              go (n+1) db
 
@@ -229,6 +275,70 @@ scrapeSite SiteScraper{..} offset minID maxID = xapianDB >>= go startPage
           showPost Post{..} = io.log siteName $ unwords [ show siteID
                                                         , fileURL
                                                         , unwords tags ]
+
+downloadDoc :: Curl -> ReadWriteDB -> Document -> XapianM ()
+downloadDoc curl db doc = do
+    Right url <- decode <$> getData doc
+    fileName  <- UTF8.toString <$> getValue fileNameSlot doc
+
+    res <- io.runExceptT $ requireImage curl url fileName
+    case res of
+        Right _ -> do io $ log "dl" url
+        Left  e -> do io $ logError url e
+                      addTerm failedTag doc
+
+    delTerm unprocessedTag doc
+    replaceDocument db (docId doc) doc
+
+-- ^ High-level commands to perform
+
+scrapeSite :: A.AcidState ScraperState -> SiteScraper -> IO ()
+scrapeSite st site@SiteScraper{..} = do
+    lastMax <- io $ A.update st (RequireMax siteName)
+    --let range = def { minID = lastMax + 1 }
+    -- XXX: for now
+    let range = def { minID = 1, maxID = 3026800 - 1, startPage = 3398 }
+    res <- runExceptT $ scrapeSiteWith site st range
+    io $ A.createCheckpoint st
+
+    case res of
+        Left e  -> logError siteName e
+        Right _ -> return ()
+
+updateImages :: IO ()
+updateImages = do
+    curl <- Curl.initialize
+    Right db <- runExceptT xapianDB
+    let limit = QueryRange { rangeOffset = 0, rangeSize = 10 }
+
+        -- Loops until no more unprocessed documents
+        go = do (_, ds) <- search db (query unprocessedTag) limit
+                case ds of [] -> return ()
+                           ds -> do forM_ ds $ downloadDoc curl db
+                                    commit db
+                                    go
+
+    runXapian $ go >> close db
+
+main :: IO ()
+main = do
+    args <- getArgs
+    st   <- acidDB
+
+    -- When running without a parameter, scrape the previously active
+    -- sites. Otherwise, scrape the names sites
+    sites <- case args of
+                [] -> A.query st ActiveSites
+                as -> return as
+
+    forM_ sites $ \sn -> case find (\s -> siteName s == sn) scrapers of
+        Just s -> scrapeSite st s
+        Nothing -> logError sn "No scraper found for this site!"
+
+    A.closeAcidState st
+
+    log "general" "Done scraping, proceeding to download new images"
+    Curl.withCurlDo updateImages
 
 -- ^ Misc helpers
 
@@ -247,11 +357,3 @@ logError name err = hPutStrLn stderr $ "["++name++"] Error: " ++ err
 
 io :: MonadIO m => IO a -> m a
 io = liftIO
-
--- TODO: keep better track of what sites need to be scraped and from where
-
--- XXX for testing
-main = do res <- runExceptT $ scrapeSite gelbooru 0 minBound maxBound
-          case res of
-            Left e  -> logError "global" e
-            Right _ -> return ()
