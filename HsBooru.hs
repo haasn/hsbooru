@@ -50,8 +50,10 @@ imageDir    = dbDir </> "images"
 xapianDir   = dbDir </> "xapian"
 acidDir     = dbDir </> "acid"
 
--- Used when downloading images
-curlOpts = [ CurlFollowLocation True ]
+-- Some misc tuning options
+curlOpts    = [ CurlFollowLocation True ]
+retryCount  = 5
+updateBatch = 100
 
 -- Term prefix mapping, for reusable tags
 statePrefix    = "X"
@@ -148,7 +150,7 @@ gelbooru = SiteScraper{..}
     where siteName = "gelbooru"
           pageSize = 100
 
-          scrapePage page = scrapeURL (apiURL ++ show page) $
+          scrapePage page = scrapeURLWithOpts curlOpts (apiURL ++ show page) $
                 chroots "post" scrapePost
 
           scrapePost = do
@@ -256,7 +258,7 @@ scrapeSiteWith SiteScraper{..} st ScrapeRange{..} = xapianDB >>= go startPage
     where go :: Int -> ReadWriteDB -> ExceptT String IO ()
           go n db = do
             io.log siteName $ "Scraping page " ++ show n
-            res <- io $ scrapePage n
+            res <- io . retry retryCount $ scrapePage n
 
             let process ps = case filter (inRange (minID, maxID) . siteID) ps of
                     [] -> io.log siteName $ "No new posts"
@@ -309,7 +311,7 @@ updateImages :: IO ()
 updateImages = do
     curl <- Curl.initialize
     Right db <- runExceptT xapianDB
-    let limit = QueryRange { rangeOffset = 0, rangeSize = 10 }
+    let limit = QueryRange { rangeOffset = 0, rangeSize = updateBatch }
 
         -- Loops until no more unprocessed documents
         go = do (_, ds) <- search db (query unprocessedTag) limit
@@ -357,3 +359,11 @@ logError name err = hPutStrLn stderr $ "["++name++"] Error: " ++ err
 
 io :: MonadIO m => IO a -> m a
 io = liftIO
+
+retry :: Int -> IO (Maybe a) -> IO (Maybe a)
+retry 0 _   = return Nothing
+retry n act = do
+    res <- act
+    case res of
+        Just r  -> return res
+        Nothing -> retry (n-1) act
