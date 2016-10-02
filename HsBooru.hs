@@ -4,6 +4,7 @@
 import Prelude hiding (log)
 
 import Control.Applicative
+import Control.Concurrent.Async (forConcurrently)
 import Control.Monad
 import Control.Monad.Fail
 import Control.Monad.Trans.Except
@@ -53,7 +54,8 @@ acidDir     = dbDir </> "acid"
 -- Some misc tuning options
 curlOpts    = [ CurlFollowLocation True ]
 retryCount  = 5
-updateBatch = 100
+updateBatch = 10
+pageBatch   = 5
 
 -- Term prefix mapping, for reusable tags
 statePrefix    = "X"
@@ -150,8 +152,11 @@ gelbooru = SiteScraper{..}
     where siteName = "gelbooru"
           pageSize = 100
 
-          scrapePage page = scrapeURLWithOpts curlOpts (apiURL ++ show page) $
-                chroots "post" scrapePost
+          scrapePage page = do
+                let pageURL = apiURL ++ show page
+                log siteName $ "Requesting " ++ pageURL
+                scrapeURLWithOpts curlOpts pageURL $ chroots "post" scrapePost
+                                                  <|> pure []
 
           scrapePost = do
                 let post  = "post"
@@ -251,27 +256,29 @@ data ScrapeRange = ScrapeRange
 instance Default ScrapeRange where
     def = ScrapeRange { startPage = 0, minID = minBound, maxID = maxBound }
 
-scrapeSiteWith :: SiteScraper -> A.AcidState ScraperState -> ScrapeRange
-               -> ExceptT String IO ()
+scrapeSiteWith :: SiteScraper -> ReadWriteDB -> A.AcidState ScraperState
+               -> ScrapeRange -> ExceptT String IO ()
 
-scrapeSiteWith SiteScraper{..} st ScrapeRange{..} = xapianDB >>= go startPage
-    where go :: Int -> ReadWriteDB -> ExceptT String IO ()
-          go n db = do
-            io.log siteName $ "Scraping page " ++ show n
-            res <- io . retry retryCount $ scrapePage n
+scrapeSiteWith SiteScraper{..} db st ScrapeRange{..} = go startPage
+    where go :: Int -> ExceptT String IO ()
+          go n = do
+            let scrapeRange = [n .. n + pageBatch - 1]
+            io.log siteName $ "Scraping pages " ++ show scrapeRange
+            res <- io.forConcurrently scrapeRange $ retry retryCount . scrapePage
 
             let process ps = case filter (inRange (minID, maxID) . siteID) ps of
                     [] -> io.log siteName $ "No new posts"
                     ps -> do runXM $ mapM_ (xapianStore db) ps >> commit db
                              let m = maximum $ map siteID ps
                              io $ A.update st (RecordMax siteName m)
+                             io $ A.createCheckpoint st
                              mapM_ showPost ps
-                             go (n+1) db
+                             go (n+pageBatch)
 
-            case res of
+            case sequence res of
                 Nothing -> throwE "Scraper failed to scrape page"
                 Just [] -> throwE "Scraper returned no results"
-                Just ps -> process ps
+                Just ps -> process $ concat ps
 
 
           showPost Post{..} = io.log siteName $ unwords [ show siteID
@@ -294,23 +301,20 @@ downloadDoc curl db doc = do
 
 -- ^ High-level commands to perform
 
-scrapeSite :: A.AcidState ScraperState -> SiteScraper -> IO ()
-scrapeSite st site@SiteScraper{..} = do
+scrapeSite :: ReadWriteDB -> A.AcidState ScraperState -> SiteScraper -> IO ()
+scrapeSite db st site@SiteScraper{..} = do
     lastMax <- io $ A.update st (RequireMax siteName)
-    --let range = def { minID = lastMax + 1 }
-    -- XXX: for now
-    let range = def { minID = 1, maxID = 3026800 - 1, startPage = 3398 }
-    res <- runExceptT $ scrapeSiteWith site st range
-    io $ A.createCheckpoint st
-
+    let range = def { minID = lastMax + 1 }
+    -- XXX: for initial sync
+    --let range = def { minID = 1, maxID = 2302525 - 1, startPage = 10284 }
+    res <- runExceptT $ scrapeSiteWith site db st range
     case res of
         Left e  -> logError siteName e
         Right _ -> return ()
 
-updateImages :: IO ()
-updateImages = do
+updateImages :: ReadWriteDB -> IO ()
+updateImages db = do
     curl <- Curl.initialize
-    Right db <- runExceptT xapianDB
     let limit = QueryRange { rangeOffset = 0, rangeSize = updateBatch }
 
         -- Loops until no more unprocessed documents
@@ -320,12 +324,13 @@ updateImages = do
                                     commit db
                                     go
 
-    runXapian $ go >> close db
+    runXapian go
 
 main :: IO ()
 main = do
     args <- getArgs
     st   <- acidDB
+    db   <- either error id <$> runExceptT xapianDB
 
     -- When running without a parameter, scrape the previously active
     -- sites. Otherwise, scrape the names sites
@@ -334,13 +339,13 @@ main = do
                 as -> return as
 
     forM_ sites $ \sn -> case find (\s -> siteName s == sn) scrapers of
-        Just s -> scrapeSite st s
+        Just s -> scrapeSite db st s
         Nothing -> logError sn "No scraper found for this site!"
 
     A.closeAcidState st
 
     log "general" "Done scraping, proceeding to download new images"
-    Curl.withCurlDo updateImages
+    Curl.withCurlDo $ updateImages db
 
 -- ^ Misc helpers
 
@@ -351,8 +356,13 @@ requireRight :: Show e => IO (Either e a) -> ExceptT String IO a
 requireRight = either (throwE . show) pure <=< liftIO
 
 log, logError :: String -> String -> IO ()
-log      name msg = hPutStrLn stdout $ "["++name++"] " ++ msg
-logError name err = hPutStrLn stderr $ "["++name++"] Error: " ++ err
+log      name msg = hPutStrLn' stdout $ "["++name++"] " ++ msg
+logError name err = hPutStrLn' stderr $ "["++name++"] Error: " ++ err
+
+hPutStrLn' :: Handle -> String -> IO ()
+hPutStrLn' h str = do
+    t <- getZonedTime
+    hPutStrLn h $ show t ++ " " ++ str
 
 (<&>) :: Functor f => f a -> (a -> b) -> f b
 (<&>) = flip (<$>)
