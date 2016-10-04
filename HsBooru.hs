@@ -1,10 +1,12 @@
 {-# LANGUAGE TemplateHaskell, RecordWildCards, PatternSynonyms, ViewPatterns,
-             LambdaCase, TypeFamilies, TypeSynonymInstances, FlexibleInstances #-}
+             LambdaCase, TypeFamilies, TypeSynonymInstances, FlexibleInstances,
+             ScopedTypeVariables #-}
 
 import Prelude hiding (log)
 
 import Control.Applicative
 import Control.Concurrent.Async (forConcurrently)
+import Control.Exception
 import Control.Monad
 import Control.Monad.Fail
 import Control.Monad.Trans.Except
@@ -16,7 +18,6 @@ import Data.Default
 import Data.Ix (inRange)
 import Data.Time
 import Data.SafeCopy
-import Data.Serialize
 import Data.Char
 import Data.List (find, isPrefixOf)
 import Data.Maybe (maybeToList)
@@ -52,7 +53,7 @@ xapianDir   = dbDir </> "xapian"
 acidDir     = dbDir </> "acid"
 
 -- Some misc tuning options
-curlOpts    = [ CurlFollowLocation True ]
+curlOpts    = [ CurlFollowLocation True,  CurlConnectTimeout 20 ]
 retryCount  = 5
 updateBatch = 10
 pageBatch   = 5
@@ -195,10 +196,10 @@ requireImage curl url fileName = do
 
 download :: Curl -> URL -> FilePath -> ExceptT String IO ()
 download curl url path = do
-    res <- liftIO $ Curl.do_curl_ curl url curlOpts
+    res <- ioCatch $ Curl.do_curl_ curl url curlOpts
     case res :: CurlResponse_ [(String, String)] LBS.ByteString of
         CurlResponse { respCurlCode = CurlOK, respBody = img }
-            -> liftIO $ LBS.writeFile path img
+            -> ioCatch $ LBS.writeFile path img
 
         CurlResponse { respCurlCode = err }
             -> throwE $ "Error downloading " ++ url ++ ": " ++ show err
@@ -225,7 +226,7 @@ xapianStore :: WritableDatabase db => db -> Post -> XapianM ()
 xapianStore db Post{..} = do
     doc <- emptyDocument
     addTerm unprocessedTag doc
-    setData (encode fileURL) doc
+    setData (UTF8.fromString fileURL) doc
 
     encVal doc siteIDSlot siteID
     encVal doc scoreSlot score
@@ -243,7 +244,7 @@ xapianDB :: ExceptT String IO ReadWriteDB
 xapianDB = requireRight $ openReadWrite CreateOrOpen xapianDir
 
 runXM :: XapianM a -> ExceptT String IO a
-runXM = io . runXapian
+runXM = ioCatch . runXapian
 
 -- ^ Mid-level wrappers for the above primitives
 
@@ -270,8 +271,8 @@ scrapeSiteWith SiteScraper{..} db st ScrapeRange{..} = go startPage
                     [] -> io.log siteName $ "No new posts"
                     ps -> do runXM $ mapM_ (xapianStore db) ps >> commit db
                              let m = maximum $ map siteID ps
-                             io $ A.update st (RecordMax siteName m)
-                             io $ A.createCheckpoint st
+                             ioCatch $ A.update st (RecordMax siteName m)
+                             ioCatch $ A.createCheckpoint st
                              mapM_ showPost ps
                              go (n+pageBatch)
 
@@ -287,7 +288,7 @@ scrapeSiteWith SiteScraper{..} db st ScrapeRange{..} = go startPage
 
 downloadDoc :: Curl -> ReadWriteDB -> Document -> XapianM ()
 downloadDoc curl db doc = do
-    Right url <- decode <$> getData doc
+    url       <- UTF8.toString <$> getData doc
     fileName  <- UTF8.toString <$> getValue fileNameSlot doc
 
     res <- io.runExceptT $ requireImage curl url fileName
@@ -350,10 +351,10 @@ main = do
 -- ^ Misc helpers
 
 requireJust :: String -> IO (Maybe a) -> ExceptT String IO a
-requireJust err = maybe (throwE err) pure <=< liftIO
+requireJust err = maybe (throwE err) pure <=< io
 
 requireRight :: Show e => IO (Either e a) -> ExceptT String IO a
-requireRight = either (throwE . show) pure <=< liftIO
+requireRight = either (throwE . show) pure <=< io
 
 log, logError :: String -> String -> IO ()
 log      name msg = hPutStrLn' stdout $ "["++name++"] " ++ msg
@@ -369,6 +370,13 @@ hPutStrLn' h str = do
 
 io :: MonadIO m => IO a -> m a
 io = liftIO
+
+ioCatch :: IO a -> ExceptT String IO a
+ioCatch act = ExceptT $ try act <&> lmap (show :: IOException -> String)
+
+lmap :: (a -> b) -> Either a x -> Either b x
+lmap f (Left  x) = Left (f x)
+lmap _ (Right x) = Right x
 
 retry :: Int -> IO (Maybe a) -> IO (Maybe a)
 retry 0 _   = return Nothing
