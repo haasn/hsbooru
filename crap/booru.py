@@ -42,7 +42,8 @@ def addRange(qp, v, f):
 def getVal(doc, slot):
     return int(sortable_unserialise(doc.get_value(slot)))
 
-def search(query=None, page=0, limit=10, sort='score', sortdesc=True):
+def search(query=None, page=0, limit=10, sort=['score', 'id'], sortdesc=True,
+           unfinished=False):
     db = Database(xapianPath)
 
     qp = QueryParser()
@@ -54,27 +55,41 @@ def search(query=None, page=0, limit=10, sort='score', sortdesc=True):
         [ addRange(qp, v, f) for f in fs ]
 
     if query:
-        flags = QueryParser.FLAG_DEFAULT | QueryParser.FLAG_BOOLEAN_ANY_CASE
+        flags = (QueryParser.FLAG_DEFAULT | QueryParser.FLAG_BOOLEAN_ANY_CASE |
+                 QueryParser.FLAG_PURE_NOT)
         q = qp.parse_query(query, flags)
     else:
         q = Query.MatchAll
 
-    q = Query(Query.OP_AND_NOT, q, Query(unprocessedTag))
+    if not unfinished:
+        q = Query(Query.OP_AND_NOT, q, Query(unprocessedTag))
 
     en = Enquire(db)
     en.set_query(q)
-    for v, fs in rangeValues:
-        [ en.set_sort_by_value(v, sortdesc) for f in fs if sort == f ]
+
+    if len(sort) > 0:
+        km = MultiValueKeyMaker()
+        for s in sort:
+            for v, fs in rangeValues:
+                [ km.add_value(v) for f in fs if s == f ]
+        en.set_sort_by_key(km, sortdesc)
 
     return en.get_mset(page*limit, limit)
 
 def listFiles(mset):
     for match in mset:
-        fileName = match.document.get_value(fileNameSlot).decode()
-        print(imagesPath + fileName)
+        doc = match.document
+        fileName = doc.get_value(fileNameSlot).decode()
+        fileURL  = doc.get_data().decode()
+
+        finished = unprocessedTag in (t.term for t in doc.termlist())
+        if finished:
+            print(imagesPath + fileName)
+        else:
+            print(fileURL)
 
 # For testing
-listFiles(search(query=' '.join(sys.argv[1:]), limit=1000))
+listFiles(search(query=' '.join(sys.argv[1:]), limit=100, unfinished=True))
 
 #    res = en.get_mset(page*limit, limit)
 #    print("Results: approx.", res.get_matches_estimated())
