@@ -1,6 +1,3 @@
-from flask import Flask
-app = Flask(__name__)
-
 # Filthy work-around for braindead breakage
 import sys
 sys.path.append('/usr/lib/python3.5/site-packages/xapian')
@@ -76,31 +73,17 @@ def search(query=None, page=0, limit=10, sort=['score', 'id'], sortdesc=True,
 
     return en.get_mset(page*limit, limit)
 
-def listFiles(mset):
-    for match in mset:
-        doc = match.document
-        fileName = doc.get_value(fileNameSlot).decode()
-        fileURL  = doc.get_data().decode()
+# Naive front-end just transforms the arguments into a list of tags
+tags = sys.argv[1:]
+mset = search(query=' '.join(tags), limit=100, unfinished=True)
 
-        finished = unprocessedTag in (t.term for t in doc.termlist())
-        if finished:
-            print(imagesPath + fileName)
-        else:
-            print(fileURL)
+for match in mset:
+    doc = match.document
+    fileName = doc.get_value(fileNameSlot).decode()
+    fileURL  = doc.get_data().decode()
 
-# For testing
-listFiles(search(query=' '.join(sys.argv[1:]), limit=100, unfinished=True))
-
-#    res = en.get_mset(page*limit, limit)
-#    print("Results: approx.", res.get_matches_estimated())
-#
-#    for match in res:
-#        doc = match.document
-#
-#        id    = getVal(doc, siteIDSlot)
-#        score = getVal(doc, scoreSlot)
-#        file  = doc.get_value(fileNameSlot)
-#
-#        print(id, score, doc.get_docid())
-#
-#    db.close()
+    finished = unprocessedTag in (t.term for t in doc.termlist())
+    if finished:
+        print(imagesPath + fileName)
+    else:
+        print(fileURL)
