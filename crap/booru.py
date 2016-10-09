@@ -1,3 +1,5 @@
+import argparse
+
 # Filthy work-around for braindead breakage
 import sys
 sys.path.append('/usr/lib/python3.5/site-packages/xapian')
@@ -14,7 +16,8 @@ scoreSlot    = 1
 fileNameSlot = 2
 sourceSlot   = 3
 
-unprocessedTag = 'Xtodo'
+unprocessedTag = b'Xtodo'
+failedTag      = b'Xfailed'
 
 termPrefixes = [
     ('B', ["booru", "site"]),
@@ -33,14 +36,23 @@ strValues = [
 ]
 
 # Helpers
-def addRange(qp, v, f):
-    qp.add_valuerangeprocessor(NumberValueRangeProcessor(v, f + ':'))
+def addRange(qp, r, v, f):
+    qp.add_valuerangeprocessor(r(v, f + ':'))
 
 def getVal(doc, slot):
     return int(sortable_unserialise(doc.get_value(slot)))
 
-def search(query=None, page=0, limit=10, sort=['score', 'id'], sortdesc=True,
-           unfinished=False):
+def showTerm(t):
+    t = t.decode()
+
+    for p, ns in termPrefixes:
+        if t[0] == p:
+            t = ns[0]+':'+t[1:]
+
+    return t
+
+def search(query=None, page=0, limit=10, sort=None, sortdesc=True,
+           unfinished=False, **ignored):
     db = Database(xapianPath)
 
     qp = QueryParser()
@@ -49,7 +61,9 @@ def search(query=None, page=0, limit=10, sort=['score', 'id'], sortdesc=True,
     for p, fs in termPrefixes:
         [ qp.add_boolean_prefix(f, p) for f in fs ]
     for v, fs in rangeValues:
-        [ addRange(qp, v, f) for f in fs ]
+        [ addRange(qp, NumberValueRangeProcessor, v, f) for f in fs ]
+    for v, fs in strValues:
+        [ addRange(qp, StringValueRangeProcessor, v, f) for f in fs ]
 
     if query:
         flags = (QueryParser.FLAG_DEFAULT | QueryParser.FLAG_BOOLEAN_ANY_CASE |
@@ -58,32 +72,102 @@ def search(query=None, page=0, limit=10, sort=['score', 'id'], sortdesc=True,
     else:
         q = Query.MatchAll
 
+    q = Query(Query.OP_AND_NOT, q, Query(failedTag))
     if not unfinished:
         q = Query(Query.OP_AND_NOT, q, Query(unprocessedTag))
 
     en = Enquire(db)
     en.set_query(q)
 
-    if len(sort) > 0:
-        km = MultiValueKeyMaker()
-        for s in sort:
-            for v, fs in rangeValues:
-                [ km.add_value(v) for f in fs if s == f ]
-        en.set_sort_by_key(km, sortdesc)
+    if sort is not None and sort != 'none':
+        for v, fs in rangeValues:
+            [ en.set_sort_by_value(v, sortdesc) for f in fs if sort == f ]
 
     return en.get_mset(page*limit, limit)
 
-# Naive front-end just transforms the arguments into a list of tags
-tags = sys.argv[1:]
-mset = search(query=' '.join(tags), limit=100, unfinished=True)
 
-for match in mset:
-    doc = match.document
-    fileName = doc.get_value(fileNameSlot).decode()
-    fileURL  = doc.get_data().decode()
+# Commands
+def listFiles(mset, args):
+    for match in mset:
+        doc = match.document
+        finished = True
 
-    finished = unprocessedTag in (t.term for t in doc.termlist())
-    if finished:
-        print(imagesPath + fileName)
-    else:
-        print(fileURL)
+        # Only perform this check if it might be necessary, because it's slow
+        if args.unfinished:
+            finished = not unprocessedTag in (t.term for t in doc.termlist())
+
+        if finished:
+            fileName = doc.get_value(fileNameSlot).decode()
+            print(imagesPath + fileName)
+        else:
+            fileURL = doc.get_data().decode()
+            print(fileURL)
+
+def showInfo(mset, args):
+    for match in mset:
+        doc = match.document
+
+        print('-- Document', doc.get_docid(), '--')
+        for v, fs in strValues:
+            print(fs[0]+':'+doc.get_value(v).decode())
+        for v, fs in rangeValues:
+            print(fs[0]+':'+str(getVal(doc, v)))
+
+        for t in doc.termlist():
+            print(showTerm(t.term))
+
+def showTags(mset, args):
+    tags = set()
+
+    for match in mset:
+        tags = tags.union(set([ t.term for t in match.document.termlist()]))
+
+    tags = list(tags)
+    tags.sort()
+
+    for t in tags:
+        print(showTerm(t), mset.get_termfreq(t))
+
+def count(mset, args):
+    print(mset.get_matches_estimated())
+
+commands = {
+    'list': listFiles,
+    'info': showInfo,
+    'tags': showTags,
+    'count': count,
+}
+
+
+def main():
+    # Parse the options
+    opt = argparse.ArgumentParser(description='Query a hsbooru database.')
+    opt.add_argument('-s', '--sort', default='none', metavar='VAL',
+                     choices=['none'] + sum([x[1] for x in rangeValues], []),
+                     help='value to sort results by')
+
+    opt.add_argument('-a', '--asc', action='store_false', dest='sortdesc',
+                     help='sort ascending (lowest first)')
+
+    opt.add_argument('-u', '--url', action='store_true', dest='unfinished',
+                     help='allow printing URLs for unfinished images')
+
+    opt.add_argument('-l', '--limit', type=int, default=100,
+                     help='how many results to return')
+
+    opt.add_argument('-p', '--page', type=int, default=0,
+                     help='which page of the results to return')
+
+    opt.add_argument('action', metavar='ACTION', choices=list(commands.keys()),
+                     help='what to do with the results')
+
+    opt.add_argument('query', nargs='*', metavar='TAG',
+                     help='tag expression to search for')
+
+    args = opt.parse_args()
+    args.query = ' '.join(args.query)
+
+    mset = search(**vars(args))
+    commands[args.action](mset, args)
+
+main()

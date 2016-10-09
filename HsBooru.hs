@@ -53,7 +53,7 @@ xapianDir   = dbDir </> "xapian"
 acidDir     = dbDir </> "acid"
 
 -- Some misc tuning options
-curlOpts    = [ CurlFollowLocation True,  CurlConnectTimeout 20 ]
+curlOpts    = [ CurlFollowLocation True, CurlConnectTimeout 20 ]
 retryCount  = 5
 updateBatch = 10
 pageBatch   = 5
@@ -306,8 +306,6 @@ scrapeSite :: ReadWriteDB -> A.AcidState ScraperState -> SiteScraper -> IO ()
 scrapeSite db st site@SiteScraper{..} = do
     lastMax <- io $ A.update st (RequireMax siteName)
     let range = def { minID = lastMax + 1 }
-    -- XXX: for initial sync
-    --let range = def { minID = 1, maxID = 2302525 - 1, startPage = 10284 }
     res <- runExceptT $ scrapeSiteWith site db st range
     case res of
         Left e  -> logError siteName e
