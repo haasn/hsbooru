@@ -23,6 +23,7 @@ termPrefixes = [
     ('B', ["booru", "site"]),
     ('U', ["uploader", "creator"]),
     ('R', ["rating"]),
+    ('E', ["extension", "ext"]),
 ]
 
 rangeValues = [

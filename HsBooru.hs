@@ -36,7 +36,7 @@ import Network.Curl ( Curl(..), CurlCode(..), CurlOption(..)
 import Search.Xapian
 import System.Directory (doesFileExist)
 import System.Environment (getArgs)
-import System.FilePath.Posix ((</>), takeFileName)
+import System.FilePath.Posix ((</>), takeFileName, takeExtension)
 import System.IO
 
 import qualified Search.Xapian.Query.Combinators as Q
@@ -63,6 +63,7 @@ statePrefix    = "X"
 booruPrefix    = "B"
 uploaderPrefix = "U"
 ratingPrefix   = "R"
+extPrefix      = "E"
 tagPrefix      = ""
 
 -- Because we're collecting post data separately from performing the actual
@@ -236,6 +237,7 @@ xapianStore db Post{..} = do
     addTag doc booruPrefix    $ booru
     addTag doc uploaderPrefix $ show uploader
     addTag doc ratingPrefix   $ show rating
+    addTag doc extPrefix      $ drop 1 (takeExtension fileName)
     forM_ tags $ addTag doc tagPrefix
 
     void $ addDocument db doc
