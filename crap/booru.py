@@ -24,11 +24,12 @@ termPrefixes = [
     ('U', ["uploader", "creator"]),
     ('R', ["rating"]),
     ('E', ["extension", "ext"]),
+    ('',  ["tag"])
 ]
 
 rangeValues = [
-    (siteIDSlot, ["id"]),
-    (scoreSlot,  ["score"]),
+    (siteIDSlot, ["id", "new", "newest"]),
+    (scoreSlot,  ["score", "best"]),
 ]
 
 strValues = [
@@ -59,6 +60,8 @@ def search(query=None, page=0, limit=10, sort=None, sortdesc=True,
     qp = QueryParser()
     qp.set_database(db)
     qp.set_default_op(Query.OP_AND)
+    qp.set_stemming_strategy(QueryParser.STEM_NONE)
+
     for p, fs in termPrefixes:
         [ qp.add_boolean_prefix(f, p) for f in fs ]
     for v, fs in rangeValues:
@@ -127,7 +130,7 @@ def showTags(mset, args):
     tags.sort()
 
     for t in tags:
-        print(showTerm(t), mset.get_termfreq(t))
+        print('{0:10} {1}'.format(mset.get_termfreq(t), showTerm(t)))
 
 def count(mset, args):
     print(mset.get_matches_estimated())
