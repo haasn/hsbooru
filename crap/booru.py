@@ -5,6 +5,10 @@ import sys
 sys.path.append('/usr/lib/python3.5/site-packages/xapian')
 from xapian import *
 
+# Fix python unicode breakage
+import codecs
+sys.stdout = codecs.getwriter('utf8')(sys.stdout)
+
 # Global constants
 dbPath = "/z/booru/"
 xapianPath = dbPath + "xapian/"
@@ -24,6 +28,7 @@ termPrefixes = [
     ('U', ["uploader", "creator"]),
     ('R', ["rating"]),
     ('E', ["extension", "ext"]),
+    ('X', ["state"]),
     ('',  ["tag"])
 ]
 
@@ -45,7 +50,7 @@ def getVal(doc, slot):
     return int(sortable_unserialise(doc.get_value(slot)))
 
 def showTerm(t):
-    t = t.decode()
+    t = t.decode('utf-8')
 
     for p, ns in termPrefixes:
         if t[0] == p:
@@ -112,8 +117,9 @@ def showInfo(mset, args):
         doc = match.document
 
         print('-- Document', doc.get_docid(), '--')
+        print('url:' + doc.get_data().decode())
         for v, fs in strValues:
-            print(fs[0]+':'+doc.get_value(v).decode())
+            print(fs[0]+':'+doc.get_value(v).decode('utf-8'))
         for v, fs in rangeValues:
             print(fs[0]+':'+str(getVal(doc, v)))
 

@@ -53,7 +53,7 @@ xapianDir   = dbDir </> "xapian"
 acidDir     = dbDir </> "acid"
 
 -- Some misc tuning options
-curlOpts    = [ CurlFollowLocation True, CurlConnectTimeout 20 ]
+curlOpts    = [ CurlFollowLocation True, CurlConnectTimeout 20, CurlTimeout 20 ]
 retryCount  = 5
 updateBatch = 10
 pageBatch   = 5
