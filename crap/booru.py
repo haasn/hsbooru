@@ -144,6 +144,7 @@ def count(mset, args):
 commands = {
     'list': listFiles,
     'info': showInfo,
+    'show': showInfo,
     'tags': showTags,
     'count': count,
 }
