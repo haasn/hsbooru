@@ -64,6 +64,7 @@ booruPrefix    = "B"
 uploaderPrefix = "U"
 ratingPrefix   = "R"
 extPrefix      = "E"
+filePrefix     = "F"
 tagPrefix      = ""
 
 -- Because we're collecting post data separately from performing the actual
@@ -237,6 +238,7 @@ xapianStore db Post{..} = do
     addTag doc booruPrefix    $ booru
     addTag doc uploaderPrefix $ show uploader
     addTag doc ratingPrefix   $ show rating
+    addTag doc filePrefix     $ fileName
     addTag doc extPrefix      $ drop 1 (takeExtension fileName)
     forM_ tags $ addTag doc tagPrefix
 

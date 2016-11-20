@@ -29,6 +29,7 @@ termPrefixes = [
     ('R', ["rating"]),
     ('E', ["extension", "ext"]),
     ('X', ["state"]),
+    ('F', ["file", "hash"]),
     ('',  ["tag"])
 ]
 
@@ -38,7 +39,6 @@ rangeValues = [
 ]
 
 strValues = [
-    (fileNameSlot, ["file", "hash"]),
     (sourceSlot,   ["source", "src"]),
 ]
 
