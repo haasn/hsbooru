@@ -10,7 +10,7 @@ import codecs
 sys.stdout = codecs.getwriter('utf8')(sys.stdout)
 
 # Global constants
-dbPath = "/z/booru/"
+dbPath = "/booru/"
 xapianPath = dbPath + "xapian/"
 imagesPath = dbPath + "images/"
 

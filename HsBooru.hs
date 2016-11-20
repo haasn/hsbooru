@@ -47,13 +47,13 @@ import Text.HTML.Scalpel hiding (curlOpts, scrape)
 -- ^ Global configuration and constants
 
 -- Directories
-dbDir       = "/z/booru/"
+dbDir       = "/booru/"
 imageDir    = dbDir </> "images"
 xapianDir   = dbDir </> "xapian"
 acidDir     = dbDir </> "acid"
 
 -- Some misc tuning options
-curlOpts    = [ CurlFollowLocation True, CurlConnectTimeout 20, CurlTimeout 20 ]
+curlOpts    = [ CurlFollowLocation True, CurlConnectTimeout 100, CurlTimeout 600 ]
 retryCount  = 5
 updateBatch = 10
 pageBatch   = 5
