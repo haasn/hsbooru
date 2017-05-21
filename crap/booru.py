@@ -153,7 +153,7 @@ commands = {
 def main():
     # Parse the options
     opt = argparse.ArgumentParser(description='Query a hsbooru database.')
-    opt.add_argument('-s', '--sort', default='none', metavar='VAL',
+    opt.add_argument('-s', '--sort', default='new', metavar='VAL',
                      choices=['none'] + sum([x[1] for x in rangeValues], []),
                      help='value to sort results by')
 
@@ -163,7 +163,7 @@ def main():
     opt.add_argument('-u', '--url', action='store_true', dest='unfinished',
                      help='allow printing URLs for unfinished images')
 
-    opt.add_argument('-l', '--limit', type=int, default=100,
+    opt.add_argument('-l', '--limit', type=int, default=1000,
                      help='how many results to return')
 
     opt.add_argument('-p', '--page', type=int, default=0,
