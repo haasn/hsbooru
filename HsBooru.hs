@@ -322,10 +322,9 @@ updateImages db = do
 
         -- Loops until no more unprocessed documents
         go = do (_, ds) <- search db (query unprocessedTag) limit
-                case ds of [] -> return ()
-                           ds -> do forM_ ds $ downloadDoc curl db
-                                    commit db
-                                    go
+                unless (null ds) $ do
+                    forM_ ds $ downloadDoc curl db
+                    commit db >> go
 
     runXapian go
 
