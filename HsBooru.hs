@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell, RecordWildCards, PatternSynonyms, ViewPatterns,
              LambdaCase, TypeFamilies, TypeSynonymInstances, FlexibleInstances,
-             ScopedTypeVariables #-}
+             ScopedTypeVariables, OverloadedStrings #-}
 
 import Prelude hiding (log)
 
@@ -143,7 +143,7 @@ chomp (x:xs) (y:ys)
     | x == y    = chomp xs ys
     | otherwise = Nothing
 
-attrRead :: (Selectable s, Read a) => String -> s -> Scraper String a
+attrRead :: Read a => String -> Selector -> Scraper String a
 attrRead a = maybe mzero pure . readMaybe <=< attr a
 
 scrapers :: [SiteScraper]
