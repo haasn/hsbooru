@@ -166,7 +166,7 @@ gelbooru = SiteScraper{..}
                     booru = siteName
 
                 siteID   <- attrRead "id" post
-                fileURL  <- attr     "file_url"   post
+                fileURL  <- ("http:"++) <$> attr "file_url" post
                 uploader <- attrRead "creator_id" post
                 score    <- attrRead "score"      post
                 tags     <- attr "tags"   post <&> words
