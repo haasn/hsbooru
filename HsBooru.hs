@@ -5,28 +5,28 @@
 import Prelude hiding (log)
 
 import Control.Applicative
-import Control.Concurrent.Async (forConcurrently)
+import Control.Concurrent.Async (Concurrently(..), mapConcurrently)
 import Control.Exception
 import Control.Monad
 import Control.Monad.Fail
 import Control.Monad.Trans.Except
 import Control.Monad.IO.Class
 import Control.Monad.State (modify, gets)
-import Control.Monad.Reader (ask)
+import Control.Monad.Reader (asks)
 
 import Data.Default
 import Data.Ix (inRange)
 import Data.Time
 import Data.SafeCopy
 import Data.Char
-import Data.List (find, isPrefixOf)
-import Data.Maybe (maybeToList)
+import Data.List (find)
+import Data.Maybe (fromMaybe, listToMaybe)
 
 import qualified Data.Acid as A
-import qualified Data.Map as M
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.UTF8 as UTF8
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.IntervalSet as IS
+import qualified Data.Map as M
 import qualified Data.Text as T
 
 import qualified Network.Curl as Curl
@@ -55,31 +55,23 @@ acidDir     = dbDir </> "acid"
 -- Some misc tuning options
 curlOpts    = [ CurlFollowLocation True, CurlConnectTimeout 100, CurlTimeout 600 ]
 retryCount  = 5
-updateBatch = 10
-pageBatch   = 5
+postBatch   = 10
 
 -- Term prefix mapping, for reusable tags
-statePrefix    = "X"
 booruPrefix    = "B"
+siteIDPrefix   = "I"
 uploaderPrefix = "U"
 ratingPrefix   = "R"
 extPrefix      = "E"
 filePrefix     = "F"
 tagPrefix      = ""
 
--- Because we're collecting post data separately from performing the actual
--- downloading, we use tags to signal post state
-unprocessedTag = mkStateTag "todo"
-failedTag      = mkStateTag "failed"
-
-mkStateTag :: String -> BS.ByteString
-mkStateTag tag = UTF8.fromString $ statePrefix ++ tag
-
 -- Value mapping, for per-document unique identification
 siteIDSlot   = 0
 scoreSlot    = 1
 fileNameSlot = 2
-sourceSlot   = 3
+fileURLSlot  = 3
+sourceSlot   = 4
 
 -- ^ Types and instances
 
@@ -99,33 +91,59 @@ data Rating = Safe | Questionable | Explicit
     deriving (Show, Read)
 
 data SiteScraper = SiteScraper
-    { siteName   :: String
-    , pageSize   :: !Int
-    , scrapePage :: Int -> IO (Maybe [Post])
+    { siteName :: String
+    , idRange  :: IO (Maybe IS.IntSet)
+    , scrapeID :: Int -> ExceptT String IO (Maybe Post)
     }
 
+-- ^ Scraper internal state and database
+
+type PostSet = IS.IntSet
+
+-- Invariant: successMap and failedMap are disjoint
+data SiteState = SiteState
+    { successMap :: !PostSet
+    , failedMap  :: !PostSet
+    }
+
+instance Monoid SiteState where
+    mempty = def
+    mappend (SiteState ca fa) (SiteState cb fb) = SiteState{..}
+        -- Success overrides failure
+        where successMap = IS.union ca cb
+              failedMap  = IS.union fa fb `IS.difference` successMap
+
+instance Default SiteState where
+    def = SiteState IS.empty IS.empty
+
+postSuccess, postFailed :: Int -> SiteState
+postSuccess id = def { successMap = IS.singleton id }
+postFailed  id = def { failedMap  = IS.singleton id }
+
+allPosts :: SiteState -> PostSet
+allPosts SiteState{..} = successMap `IS.union` failedMap
+
 -- Can't be a newtype due to overly strict nominal role constraints on SafeCopy
-type ScraperState = M.Map String Int
+type ScraperState = M.Map String SiteState
 
 -- ^ acid-state integration
+
+deriveSafeCopy 0 'base ''IS.IntSet
+deriveSafeCopy 0 'base ''SiteState
 
 acidDB :: IO (A.AcidState ScraperState)
 acidDB = A.openLocalStateFrom acidDir M.empty
 
 activeSites :: A.Query ScraperState [String]
-activeSites = M.keys <$> ask
+activeSites = asks M.keys
 
-recordMax :: String -> Int -> A.Update ScraperState ()
-recordMax k = modify . M.insertWith max k
+getSite :: String -> A.Query ScraperState SiteState
+getSite k = asks $ fromMaybe def . M.lookup k
 
-requireMax :: String -> A.Update ScraperState Int
-requireMax k = do
-    v <- gets $ M.lookup k
-    case v of
-        Nothing -> 0 <$ modify (M.insert k 0)
-        Just v' -> return v'
+updateSite :: String -> SiteState -> A.Update ScraperState ()
+updateSite k = modify . M.insertWith mappend k
 
-A.makeAcidic ''ScraperState ['activeSites, 'recordMax, 'requireMax]
+A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite]
 
 -- ^ Scraper definitions
 
@@ -146,6 +164,9 @@ chomp (x:xs) (y:ys)
 attrRead :: Read a => String -> Selector -> Scraper String a
 attrRead a = maybe mzero pure . readMaybe <=< attr a
 
+first :: Selector -> Scraper String a -> Scraper String (Maybe a)
+first s = fmap listToMaybe . chroots s
+
 scrapers :: [SiteScraper]
 scrapers = [ gelbooru ]
 
@@ -153,20 +174,26 @@ scrapers = [ gelbooru ]
 gelbooru :: SiteScraper
 gelbooru = SiteScraper{..}
     where siteName = "gelbooru"
-          pageSize = 100
+          apiURL = "http://gelbooru.com/index.php?page=dapi&s=post&q=index"
 
-          scrapePage page = do
-                let pageURL = apiURL ++ show page
-                log siteName $ "Requesting " ++ pageURL
-                scrapeURLWithOpts curlOpts pageURL $ chroots "post" scrapePost
-                                                  <|> pure []
+          idRange = do
+                let indexURL = apiURL ++ "&limit=0"
+                log siteName $ "Requesting " ++ indexURL
+                c <- scrapeURLWithOpts curlOpts indexURL $ attrRead "count" "posts"
+                return $ fmap (IS.interval 1) c
+
+          scrapeID id = do
+                let postURL = apiURL ++ "&id=" ++ show id
+                io.log siteName $ "Requesting " ++ postURL
+                requireJust ("Failed to scrape post " ++ show id) $
+                  io.scrapeURLWithOpts curlOpts postURL $ first "post" scrapePost
 
           scrapePost = do
                 let post  = "post"
                     booru = siteName
 
                 siteID   <- attrRead "id" post
-                fileURL  <- ("http:"++) <$> attr "file_url" post
+                fileURL  <- ("http:" ++) <$> attr "file_url" post
                 uploader <- attrRead "creator_id" post
                 score    <- attrRead "score"      post
                 tags     <- attr "tags"   post <&> words
@@ -185,16 +212,13 @@ gelbooru = SiteScraper{..}
 
                 return Post{..}
 
-          apiURL = "http://gelbooru.com/index.php?page=dapi&s=post"++
-                   "&q=index&limit="++show pageSize++"&pid="
-
 -- ^ Image downloading and storing
 
-requireImage :: Curl -> URL -> String -> ExceptT String IO ()
-requireImage curl url fileName = do
+requireImage :: Curl -> Post -> ExceptT String IO ()
+requireImage curl Post{..} = do
     let filePath = imageDir </> fileName
     e <- liftIO $ doesFileExist filePath
-    unless e $ download curl url filePath
+    unless e $ download curl fileURL filePath
 
 download :: Curl -> URL -> FilePath -> ExceptT String IO ()
 download curl url path = do
@@ -227,15 +251,14 @@ encVal doc val num = do
 xapianStore :: WritableDatabase db => db -> Post -> XapianM ()
 xapianStore db Post{..} = do
     doc <- emptyDocument
-    addTerm unprocessedTag doc
-    setData (UTF8.fromString fileURL) doc
-
     encVal doc siteIDSlot siteID
     encVal doc scoreSlot score
     strVal doc fileNameSlot fileName
+    strVal doc fileURLSlot  fileURL
     forM_ source $ strVal doc sourceSlot
 
     addTag doc booruPrefix    $ booru
+    addTag doc siteIDPrefix   $ show siteID
     addTag doc uploaderPrefix $ show uploader
     addTag doc ratingPrefix   $ show rating
     addTag doc filePrefix     $ fileName
@@ -252,84 +275,62 @@ runXM = ioCatch . runXapian
 
 -- ^ Mid-level wrappers for the above primitives
 
-data ScrapeRange = ScrapeRange
-    { startPage :: !Int
-    , minID :: !Int
-    , maxID :: !Int
-    }
+fetchID :: SiteScraper -> Curl -> Int -> ExceptT String IO (Maybe Post)
+fetchID SiteScraper{..} curl id = do
+    post <- scrapeID id
+    forM_ post $ requireImage curl
+    return post
 
-instance Default ScrapeRange where
-    def = ScrapeRange { startPage = 0, minID = minBound, maxID = maxBound }
+scrapeSiteWith :: SiteScraper -> Curl -> ReadWriteDB -> A.AcidState ScraperState
+               -> ExceptT String IO ()
 
-scrapeSiteWith :: SiteScraper -> ReadWriteDB -> A.AcidState ScraperState
-               -> ScrapeRange -> ExceptT String IO ()
+scrapeSiteWith site@SiteScraper{..} curl db st = do
+    siteState <- io $ A.query st (GetSite siteName)
+    siteRange <- requireJust "Failed to retrieve active ID range" idRange
 
-scrapeSiteWith SiteScraper{..} db st ScrapeRange{..} = go startPage
-    where go :: Int -> ExceptT String IO ()
-          go n = do
-            let scrapeRange = [n .. n + pageBatch - 1]
-            io.log siteName $ "Scraping pages " ++ show scrapeRange
-            res <- io.forConcurrently scrapeRange $ retry retryCount . scrapePage
+    let new = siteRange `IS.difference` allPosts siteState
+    io.log siteName $ "New post range: " ++ show (IS.findMin new, IS.findMax new)
+    go new
 
-            let process ps = case filter (inRange (minID, maxID) . siteID) ps of
-                    [] -> io.log siteName $ "No new posts"
-                    ps -> do runXM $ mapM_ (xapianStore db) ps >> commit db
-                             let m = maximum $ map siteID ps
-                             ioCatch $ A.update st (RecordMax siteName m)
-                             ioCatch $ A.createCheckpoint st
-                             mapM_ showPost ps
-                             go (n+pageBatch)
+    ioCatch $ A.createCheckpoint st
 
-            case sequence res of
-                Nothing -> throwE "Scraper failed to scrape page"
-                Just [] -> throwE "Scraper returned no results"
-                Just ps -> process $ concat ps
+    where go :: PostSet -> ExceptT String IO ()
+          go posts | IS.null posts = return ()
 
+          go posts = do
+            let scrapeIDs = take postBatch $ IS.toList posts
+            io.log siteName $ "Scraping posts " ++ show scrapeIDs
+            res <- forConcurrentlyE scrapeIDs $ retry retryCount . fetchID site curl
 
-          showPost Post{..} = io.log siteName $ unwords [ show siteID
-                                                        , fileURL
-                                                        , unwords tags ]
+            let process (id, post) = case post of
+                  Nothing -> do
+                    io.logError siteName $ "Post " ++ show id ++ " deleted!"
+                    return $ postFailed id
 
-downloadDoc :: Curl -> ReadWriteDB -> Document -> XapianM ()
-downloadDoc curl db doc = do
-    url       <- UTF8.toString <$> getData doc
-    fileName  <- UTF8.toString <$> getValue fileNameSlot doc
+                  Just post -> do
+                    io.log siteName $ showPost post
+                    runXM  $ xapianStore db post
+                    return $ postSuccess id
 
-    res <- io.runExceptT $ requireImage curl url fileName
-    case res of
-        Right _ -> do io $ log "dl" url
-        Left  e -> do io $ logError url e
-                      addTerm failedTag doc
+            res <- fmap mconcat . traverse process $ zip scrapeIDs res
+            runXM $ commit db
+            ioCatch . A.update st $ UpdateSite siteName res
+            go $ posts `IS.difference` allPosts res
 
-    delTerm unprocessedTag doc
-    replaceDocument db (docId doc) doc
+          showPost Post{..} = unwords [ show siteID, fileURL, unwords tags ]
 
 -- ^ High-level commands to perform
 
 scrapeSite :: ReadWriteDB -> A.AcidState ScraperState -> SiteScraper -> IO ()
 scrapeSite db st site@SiteScraper{..} = do
-    lastMax <- io $ A.update st (RequireMax siteName)
-    let range = def { minID = lastMax + 1 }
-    res <- runExceptT $ scrapeSiteWith site db st range
+    curl <- Curl.initialize
+    res <- runExceptT $ scrapeSiteWith site curl db st
     case res of
         Left e  -> logError siteName e
         Right _ -> return ()
 
-updateImages :: ReadWriteDB -> IO ()
-updateImages db = do
-    curl <- Curl.initialize
-    let limit = QueryRange { rangeOffset = 0, rangeSize = updateBatch }
-
-        -- Loops until no more unprocessed documents
-        go = do (_, ds) <- search db (query unprocessedTag) limit
-                unless (null ds) $ do
-                    forM_ ds $ downloadDoc curl db
-                    commit db >> go
-
-    runXapian go
-
 main :: IO ()
-main = do
+main = Curl.withCurlDo $ do
     args <- getArgs
     st   <- acidDB
     db   <- either error id <$> runExceptT xapianDB
@@ -345,9 +346,7 @@ main = do
         Nothing -> logError sn "No scraper found for this site!"
 
     A.closeAcidState st
-
-    log "general" "Done scraping, proceeding to download new images"
-    Curl.withCurlDo $ updateImages db
+    log "general" "Done scraping,"
 
 -- ^ Misc helpers
 
@@ -379,10 +378,10 @@ lmap :: (a -> b) -> Either a x -> Either b x
 lmap f (Left  x) = Left (f x)
 lmap _ (Right x) = Right x
 
-retry :: Int -> IO (Maybe a) -> IO (Maybe a)
-retry 0 _   = return Nothing
-retry n act = do
-    res <- act
-    case res of
-        Just r  -> return res
-        Nothing -> retry (n-1) act
+retry :: MonadPlus m => Int -> m a -> m a
+retry n = msum . replicate n
+
+forConcurrentlyE :: Traversable t => t a -> (a -> ExceptT e IO b) -> ExceptT e IO (t b)
+forConcurrentlyE ts f = recombine $ distribute
+    where distribute = mapConcurrently (runExceptT . f) ts
+          recombine  = ExceptT . fmap sequence

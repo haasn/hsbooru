@@ -18,13 +18,12 @@ imagesPath = dbPath + "images/"
 siteIDSlot   = 0
 scoreSlot    = 1
 fileNameSlot = 2
-sourceSlot   = 3
-
-unprocessedTag = b'Xtodo'
-failedTag      = b'Xfailed'
+fileURLSlot  = 3
+sourceSlot   = 4
 
 termPrefixes = [
     ('B', ["booru", "site"]),
+    ('I', ["id"]),
     ('U', ["uploader", "creator"]),
     ('R', ["rating"]),
     ('E', ["extension", "ext"]),
@@ -39,6 +38,7 @@ rangeValues = [
 ]
 
 strValues = [
+    (fileURLSlot,  ["url"]),
     (sourceSlot,   ["source", "src"]),
 ]
 
@@ -81,10 +81,6 @@ def search(query=None, page=0, limit=10, sort=None, sortdesc=True,
     else:
         q = Query.MatchAll
 
-    q = Query(Query.OP_AND_NOT, q, Query(failedTag))
-    if not unfinished:
-        q = Query(Query.OP_AND_NOT, q, Query(unprocessedTag))
-
     en = Enquire(db)
     en.set_query(q)
 
@@ -99,18 +95,8 @@ def search(query=None, page=0, limit=10, sort=None, sortdesc=True,
 def listFiles(mset, args):
     for match in mset:
         doc = match.document
-        finished = True
-
-        # Only perform this check if it might be necessary, because it's slow
-        if args.unfinished:
-            finished = not unprocessedTag in (t.term for t in doc.termlist())
-
-        if finished:
-            fileName = doc.get_value(fileNameSlot).decode()
-            print(imagesPath + fileName)
-        else:
-            fileURL = doc.get_data().decode()
-            print(fileURL)
+        fileName = doc.get_value(fileNameSlot).decode()
+        print(imagesPath + fileName)
 
 def showInfo(mset, args):
     for match in mset:
@@ -159,9 +145,6 @@ def main():
 
     opt.add_argument('-a', '--asc', action='store_false', dest='sortdesc',
                      help='sort ascending (lowest first)')
-
-    opt.add_argument('-u', '--url', action='store_true', dest='unfinished',
-                     help='allow printing URLs for unfinished images')
 
     opt.add_argument('-l', '--limit', type=int, default=1000,
                      help='how many results to return')
