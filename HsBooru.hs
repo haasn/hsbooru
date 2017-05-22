@@ -24,14 +24,15 @@ import Data.Maybe (fromMaybe, listToMaybe)
 
 import qualified Data.Acid as A
 import qualified Data.ByteString.UTF8 as UTF8
+import qualified Data.ByteString.Lazy.UTF8 as LUTF8
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.IntervalSet as IS
 import qualified Data.Map as M
 import qualified Data.Text as T
 
-import qualified Network.Curl as Curl
-import Network.Curl ( Curl(..), CurlCode(..), CurlOption(..)
-                    , CurlResponse_(..) )
+import Network.HTTP.Client
+import Network.HTTP.Client.TLS
+import Network.HTTP.Types.Status
 
 import Search.Xapian
 import System.Directory (doesFileExist)
@@ -42,7 +43,7 @@ import System.IO
 import qualified Search.Xapian.Query.Combinators as Q
 
 import Text.Read (readMaybe)
-import Text.HTML.Scalpel hiding (curlOpts, scrape)
+import Text.HTML.Scalpel.Core hiding (scrape)
 
 -- ^ Global configuration and constants
 
@@ -53,9 +54,9 @@ xapianDir   = dbDir </> "xapian"
 acidDir     = dbDir </> "acid"
 
 -- Some misc tuning options
-curlOpts    = [ CurlFollowLocation True, CurlConnectTimeout 100, CurlTimeout 600 ]
-retryCount  = 5
-postBatch   = 10
+mgrOpts    = tlsManagerSettings { managerConnCount = postBatch }
+retryCount = 5
+postBatch  = 10
 
 -- Term prefix mapping, for reusable tags
 booruPrefix    = "B"
@@ -92,8 +93,8 @@ data Rating = Safe | Questionable | Explicit
 
 data SiteScraper = SiteScraper
     { siteName :: String
-    , idRange  :: IO (Maybe IS.IntSet)
-    , scrapeID :: Int -> ExceptT String IO (Maybe Post)
+    , idRange  :: Manager -> ExceptT String IO IS.IntSet
+    , scrapeID :: Manager -> Int -> ExceptT String IO (Maybe Post)
     }
 
 -- ^ Scraper internal state and database
@@ -147,6 +148,8 @@ A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite]
 
 -- ^ Scraper definitions
 
+type URL = String
+
 -- Helper functions
 extractID :: URL -> Maybe Int
 extractID = readMaybe . dropWhile (not . isNumber)
@@ -167,6 +170,12 @@ attrRead a = maybe mzero pure . readMaybe <=< attr a
 first :: Selector -> Scraper String a -> Scraper String (Maybe a)
 first s = fmap listToMaybe . chroots s
 
+scrape :: Manager -> URL -> Scraper String a -> ExceptT String IO a
+scrape mgr url s = do
+    io.log "http" $ "Scraping " ++ url
+    body <- LUTF8.toString <$> fetch mgr url
+    maybe (throwE "Scraper returned no results") return $ scrapeStringLike body s
+
 scrapers :: [SiteScraper]
 scrapers = [ gelbooru ]
 
@@ -176,17 +185,14 @@ gelbooru = SiteScraper{..}
     where siteName = "gelbooru"
           apiURL = "https://gelbooru.com/index.php?page=dapi&s=post&q=index"
 
-          idRange = do
+          idRange mgr = do
                 let indexURL = apiURL ++ "&limit=0"
-                log siteName $ "Requesting " ++ indexURL
-                c <- scrapeURLWithOpts curlOpts indexURL $ attrRead "count" "posts"
-                return $ fmap (IS.interval 1) c
+                c <- scrape mgr indexURL $ attrRead "count" "posts"
+                return $ IS.interval 1 c
 
-          scrapeID id = do
+          scrapeID mgr id = do
                 let postURL = apiURL ++ "&id=" ++ show id
-                io.log siteName $ "Requesting " ++ postURL
-                requireJust ("Failed to scrape post " ++ show id) $
-                  io.scrapeURLWithOpts curlOpts postURL $ first "post" scrapePost
+                scrape mgr postURL $ first "post" scrapePost
 
           scrapePost = do
                 let post  = "post"
@@ -214,21 +220,23 @@ gelbooru = SiteScraper{..}
 
 -- ^ Image downloading and storing
 
-requireImage :: Curl -> Post -> ExceptT String IO ()
-requireImage curl Post{..} = do
+requireImage :: Manager -> Post -> ExceptT String IO ()
+requireImage mgr Post{..} = do
     let filePath = imageDir </> fileName
     e <- liftIO $ doesFileExist filePath
-    unless e $ download curl fileURL filePath
+    unless e $ download mgr fileURL filePath
 
-download :: Curl -> URL -> FilePath -> ExceptT String IO ()
-download curl url path = do
-    res <- ioCatch $ Curl.do_curl_ curl url curlOpts
-    case res :: CurlResponse_ [(String, String)] LBS.ByteString of
-        CurlResponse { respCurlCode = CurlOK, respBody = img }
-            -> ioCatch $ LBS.writeFile path img
+fetch :: Manager -> URL -> ExceptT String IO LBS.ByteString
+fetch mgr url = do
+    req <- parseRequest url
+    res <- ioCatch $ httpLbs req mgr
+    let status = responseStatus res
+    unless (statusIsSuccessful status) $
+        throwE $ "Error downloading " ++ url ++ ": " ++ show status
+    return $ responseBody res
 
-        CurlResponse { respCurlCode = err }
-            -> throwE $ "Error downloading " ++ url ++ ": " ++ show err
+download :: Manager -> URL -> FilePath -> ExceptT String IO ()
+download mgr url path = fetch mgr url >>= ioCatch . LBS.writeFile path
 
 -- ^ Xapian database integration
 
@@ -275,18 +283,18 @@ runXM = ioCatch . runXapian
 
 -- ^ Mid-level wrappers for the above primitives
 
-fetchID :: SiteScraper -> Curl -> Int -> ExceptT String IO (Maybe Post)
-fetchID SiteScraper{..} curl id = do
-    post <- scrapeID id
-    forM_ post $ requireImage curl
+fetchID :: SiteScraper -> Manager -> Int -> ExceptT String IO (Maybe Post)
+fetchID SiteScraper{..} mgr id = do
+    post <- scrapeID mgr id
+    forM_ post $ requireImage mgr
     return post
 
-scrapeSiteWith :: SiteScraper -> Curl -> ReadWriteDB -> A.AcidState ScraperState
+scrapeSiteWith :: SiteScraper -> Manager -> ReadWriteDB -> A.AcidState ScraperState
                -> ExceptT String IO ()
 
-scrapeSiteWith site@SiteScraper{..} curl db st = do
+scrapeSiteWith site@SiteScraper{..} mgr db st = do
     siteState <- io $ A.query st (GetSite siteName)
-    siteRange <- requireJust "Failed to retrieve active ID range" idRange
+    siteRange <- idRange mgr
 
     let new = siteRange `IS.difference` allPosts siteState
     io.log siteName $ "New post range: " ++ show (IS.findMin new, IS.findMax new)
@@ -300,7 +308,7 @@ scrapeSiteWith site@SiteScraper{..} curl db st = do
           go posts = do
             let scrapeIDs = take postBatch $ IS.toList posts
             io.log siteName $ "Scraping posts " ++ show scrapeIDs
-            res <- forConcurrentlyE scrapeIDs $ retry retryCount . fetchID site curl
+            res <- forConcurrentlyE scrapeIDs $ retry retryCount . fetchID site mgr
 
             let process (id, post) = case post of
                   Nothing -> do
@@ -323,14 +331,14 @@ scrapeSiteWith site@SiteScraper{..} curl db st = do
 
 scrapeSite :: ReadWriteDB -> A.AcidState ScraperState -> SiteScraper -> IO ()
 scrapeSite db st site@SiteScraper{..} = do
-    curl <- Curl.initialize
-    res <- runExceptT $ scrapeSiteWith site curl db st
+    mgr <- newManager mgrOpts
+    res <- runExceptT $ scrapeSiteWith site mgr db st
     case res of
         Left e  -> logError siteName e
         Right _ -> return ()
 
 main :: IO ()
-main = Curl.withCurlDo $ do
+main = do
     args <- getArgs
     st   <- acidDB
     db   <- either error id <$> runExceptT xapianDB
