@@ -103,7 +103,6 @@ def showInfo(mset, args):
         doc = match.document
 
         print('-- Document', doc.get_docid(), '--')
-        print('url:' + doc.get_data().decode())
         for v, fs in strValues:
             print(fs[0]+':'+doc.get_value(v).decode('utf-8'))
         for v, fs in rangeValues:
