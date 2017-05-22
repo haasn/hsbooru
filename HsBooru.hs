@@ -57,10 +57,10 @@ xapianDir   = dbDir </> "xapian"
 acidDir     = dbDir </> "acid"
 
 -- Some misc tuning options
-mgrOpts     = tlsManagerSettings { managerConnCount = threadCount }
+mgrOpts     = tlsManagerSettings { managerConnCount = max 10 threadCount }
 retryCount  = 5
-batchSize   = 1000
-threadCount = 30
+batchSize   = 200
+threadCount = 4
 
 -- Term prefix mapping, for reusable tags
 booruPrefix    = "B"
