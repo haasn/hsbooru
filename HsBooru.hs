@@ -106,27 +106,35 @@ data SiteScraper = SiteScraper
 type PostSet = IS.IntSet
 
 -- Invariant: successMap and failedMap are disjoint
-data SiteState = SiteState
-    { successMap :: !PostSet
-    , failedMap  :: !PostSet
+data SiteState_v0 = SiteState_v0
+    { successMap_v0 :: !PostSet
+    , failedMap_v0  :: !PostSet
     }
+
+-- Invariant: presentMap is a subset of scrapedMap
+data SiteState = SiteState
+    { scrapedMap :: !PostSet
+    , presentMap :: !PostSet
+    }
+
+instance Migrate SiteState where
+    type MigrateFrom SiteState = SiteState_v0
+    migrate SiteState_v0{..} = SiteState{..}
+        where scrapedMap = successMap_v0 `IS.union` failedMap_v0
+              presentMap = successMap_v0
 
 instance Monoid SiteState where
     mempty = def
-    mappend (SiteState ca fa) (SiteState cb fb) = SiteState{..}
-        -- Success overrides failure
-        where successMap = IS.union ca cb
-              failedMap  = IS.union fa fb `IS.difference` successMap
+    mappend (SiteState sa pa) (SiteState sb pb) = SiteState{..}
+        where scrapedMap = IS.union sa sb
+              presentMap = IS.union pa pb
 
 instance Default SiteState where
     def = SiteState IS.empty IS.empty
 
 postSuccess, postFailed :: Int -> SiteState
-postSuccess id = def { successMap = IS.singleton id }
-postFailed  id = def { failedMap  = IS.singleton id }
-
-allPosts :: SiteState -> PostSet
-allPosts SiteState{..} = successMap `IS.union` failedMap
+postSuccess id = (postFailed id) { presentMap = IS.singleton id }
+postFailed  id = def { scrapedMap = IS.singleton id }
 
 subdivide :: PostSet -> [a] -> [(PostSet, a)]
 subdivide _ [ ] = []
@@ -144,7 +152,8 @@ type ScraperState = M.Map String SiteState
 -- ^ acid-state integration
 
 deriveSafeCopy 0 'base ''IS.IntSet
-deriveSafeCopy 0 'base ''SiteState
+deriveSafeCopy 0 'base ''SiteState_v0
+deriveSafeCopy 1 'extension ''SiteState
 
 acidDB :: IO (A.AcidState ScraperState)
 acidDB = A.openLocalStateFrom acidDir M.empty
@@ -314,7 +323,7 @@ scrapeSiteWith site@SiteScraper{..} mgr db st = do
     siteState <- io $ A.query st (GetSite siteName)
     siteRange <- idRange mgr
 
-    let new = siteRange `IS.difference` allPosts siteState
+    let new = siteRange `IS.difference` scrapedMap siteState
         threads = subdivide new [1 .. threadCount]
 
     forConcurrentlyE threads $ \(ps, tid) -> do
@@ -344,7 +353,7 @@ scrapeSiteWith site@SiteScraper{..} mgr db st = do
             res <- fmap mconcat . traverse process $ zip scrapeIDs res
             runXM $ commit db
             ioCatch . A.update st $ UpdateSite siteName res
-            go $ posts `IS.difference` allPosts res
+            go $ posts `IS.difference` scrapedMap res
 
           showPost Post{..} = unwords [ show siteID, fileURL, unwords tags ]
 
@@ -374,6 +383,7 @@ main = do
         Just s -> scrapeSite db st s
         Nothing -> logError sn "No scraper found for this site!"
 
+    A.createArchive st
     A.closeAcidState st
     log "general" "Done scraping,"
 
