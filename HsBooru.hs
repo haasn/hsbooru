@@ -167,7 +167,11 @@ getSite k = asks $ fromMaybe def . M.lookup k
 updateSite :: String -> SiteState -> A.Update ScraperState ()
 updateSite k = modify . M.insertWith mappend k
 
-A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite]
+retrySite :: String -> A.Update ScraperState ()
+retrySite = modify . M.adjust reset
+    where reset ss = ss { scrapedMap = presentMap ss }
+
+A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite, 'retrySite]
 
 -- ^ Scraper definitions
 
