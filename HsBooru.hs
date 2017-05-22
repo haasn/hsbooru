@@ -174,7 +174,7 @@ scrapers = [ gelbooru ]
 gelbooru :: SiteScraper
 gelbooru = SiteScraper{..}
     where siteName = "gelbooru"
-          apiURL = "http://gelbooru.com/index.php?page=dapi&s=post&q=index"
+          apiURL = "https://gelbooru.com/index.php?page=dapi&s=post&q=index"
 
           idRange = do
                 let indexURL = apiURL ++ "&limit=0"
