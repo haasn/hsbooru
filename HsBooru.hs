@@ -6,6 +6,7 @@ import Prelude hiding (log)
 
 import Control.Applicative
 import Control.Concurrent.Async (Concurrently(..), mapConcurrently)
+import Control.Concurrent.MVar
 import Control.Exception
 import Control.Monad
 import Control.Monad.Fail
@@ -19,7 +20,8 @@ import Data.Ix (inRange)
 import Data.Time
 import Data.SafeCopy
 import Data.Char
-import Data.List (find)
+import Data.List (find, transpose)
+import Data.List.Split (chunksOf)
 import Data.Maybe (fromMaybe, listToMaybe)
 
 import qualified Data.Acid as A
@@ -39,6 +41,7 @@ import System.Directory (doesFileExist)
 import System.Environment (getArgs)
 import System.FilePath.Posix ((</>), takeFileName, takeExtension)
 import System.IO
+import System.IO.Unsafe (unsafePerformIO)
 
 import qualified Search.Xapian.Query.Combinators as Q
 
@@ -54,9 +57,10 @@ xapianDir   = dbDir </> "xapian"
 acidDir     = dbDir </> "acid"
 
 -- Some misc tuning options
-mgrOpts    = tlsManagerSettings { managerConnCount = postBatch }
-retryCount = 5
-postBatch  = 10
+mgrOpts     = tlsManagerSettings { managerConnCount = threadCount }
+retryCount  = 5
+batchSize   = 1000
+threadCount = 30
 
 -- Term prefix mapping, for reusable tags
 booruPrefix    = "B"
@@ -93,7 +97,7 @@ data Rating = Safe | Questionable | Explicit
 
 data SiteScraper = SiteScraper
     { siteName :: String
-    , idRange  :: Manager -> ExceptT String IO IS.IntSet
+    , idRange  :: Manager -> ExceptT String IO PostSet
     , scrapeID :: Manager -> Int -> ExceptT String IO (Maybe Post)
     }
 
@@ -123,6 +127,16 @@ postFailed  id = def { failedMap  = IS.singleton id }
 
 allPosts :: SiteState -> PostSet
 allPosts SiteState{..} = successMap `IS.union` failedMap
+
+subdivide :: PostSet -> [a] -> [(PostSet, a)]
+subdivide _ [ ] = []
+subdivide s [a] = [(s, a)]
+subdivide ss as = subdivide (IS.insert mid sl) al ++ subdivide sr ar
+    where -- split the post set by estimating the center
+          (sl, sr) = IS.split mid ss
+          mid = (IS.findMin ss + IS.findMax ss) `div` 2
+          -- split the value set by taking every other element
+          [al, ar] = transpose $ chunksOf 2 as
 
 -- Can't be a newtype due to overly strict nominal role constraints on SafeCopy
 type ScraperState = M.Map String SiteState
@@ -279,7 +293,11 @@ xapianDB :: ExceptT String IO ReadWriteDB
 xapianDB = requireRight $ openReadWrite CreateOrOpen xapianDir
 
 runXM :: XapianM a -> ExceptT String IO a
-runXM = ioCatch . runXapian
+runXM = ioCatch . withLock . runXapian
+    where withLock = bracket (takeMVar xapianLock) (putMVar xapianLock) . const
+
+xapianLock :: MVar ()
+xapianLock = unsafePerformIO $ newMVar ()
 
 -- ^ Mid-level wrappers for the above primitives
 
@@ -297,8 +315,11 @@ scrapeSiteWith site@SiteScraper{..} mgr db st = do
     siteRange <- idRange mgr
 
     let new = siteRange `IS.difference` allPosts siteState
-    io.log siteName $ "New post range: " ++ show (IS.findMin new, IS.findMax new)
-    go new
+        threads = subdivide new [1 .. threadCount]
+
+    forConcurrentlyE threads $ \(ps, tid) -> do
+        io.log (siteName ++ "/" ++ show tid) $ show (IS.findMin ps, IS.findMax ps)
+        go ps
 
     ioCatch $ A.createCheckpoint st
 
@@ -306,9 +327,9 @@ scrapeSiteWith site@SiteScraper{..} mgr db st = do
           go posts | IS.null posts = return ()
 
           go posts = do
-            let scrapeIDs = take postBatch $ IS.toList posts
+            let scrapeIDs = take batchSize $ IS.toList posts
             io.log siteName $ "Scraping posts " ++ show scrapeIDs
-            res <- forConcurrentlyE scrapeIDs $ retry retryCount . fetchID site mgr
+            res <- forM scrapeIDs $ retry retryCount . fetchID site mgr
 
             let process (id, post) = case post of
                   Nothing -> do
@@ -316,8 +337,8 @@ scrapeSiteWith site@SiteScraper{..} mgr db st = do
                     return $ postFailed id
 
                   Just post -> do
+                    runXM $ do xapianStore db post
                     io.log siteName $ showPost post
-                    runXM  $ xapianStore db post
                     return $ postSuccess id
 
             res <- fmap mconcat . traverse process $ zip scrapeIDs res
@@ -369,9 +390,13 @@ log      name msg = hPutStrLn' stdout $ "["++name++"] " ++ msg
 logError name err = hPutStrLn' stderr $ "["++name++"] Error: " ++ err
 
 hPutStrLn' :: Handle -> String -> IO ()
-hPutStrLn' h str = do
+hPutStrLn' h str = withLock $ do
     t <- getZonedTime
     hPutStrLn h $ show t ++ " " ++ str
+    where withLock = bracket (takeMVar ioLock) (putMVar ioLock) . const
+
+ioLock :: MVar ()
+ioLock = unsafePerformIO $ newMVar ()
 
 (<&>) :: Functor f => f a -> (a -> b) -> f b
 (<&>) = flip (<$>)
