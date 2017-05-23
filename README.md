@@ -37,6 +37,13 @@ So to avoid all of these issues, and avoid reliance on a bitrotten library
 that needs custom patches to build anyway, I've included a small wrapper for
 the (very few) functions I actually need.
 
+## Installation
+
+`cabal install` etc. should work. If you're a gentoo user, you can use my
+ebuild:
+
+https://github.com/haasn/gentoo-overlay/blob/master/net-misc/hsbooru/hsbooru-9999.ebuild
+
 ## Configuration
 
 There are some tunables in `HsBooru/Conf.hs`, in lieau of a more sensible
