@@ -1,5 +1,5 @@
 name:                HsBooru
-version:             2.0.0.0
+version:             2.1.0.0
 synopsis:            booru scraper based on xapian
 license:             GPL-3
 license-file:        LICENSE
@@ -17,19 +17,22 @@ description:
     versions of the bitrotten Xapian-Haskell bindings.
 
 executable hsbooru
-  main-is:             HsBooru.hs
+  main-is:             Main.hs
+  other-modules:       HsBooru.Conf
+                     , HsBooru.Scraper
+                     , HsBooru.Sites
+                     , HsBooru.Types
+                     , HsBooru.Util
+                     , HsBooru.Xapian
 
   ghc-options:         -O2 -threaded -rtsopts -dynamic
 
-  other-extensions:    TemplateHaskell
-                     , RecordWildCards
-                     , PatternSynonyms
-                     , ViewPatterns
+  default-extensions:  RecordWildCards
                      , LambdaCase
+
+  other-extensions:    TemplateHaskell
                      , TypeFamilies
-                     , TypeSynonymInstances
                      , FlexibleInstances
-                     , ScopedTypeVariables
                      , OverloadedStrings
 
   build-depends:       base >=4.9 && <4.10
