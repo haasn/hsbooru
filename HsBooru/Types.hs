@@ -30,9 +30,10 @@ module HsBooru.Types
     , GetSite(..)
     , UpdateSite(..)
     , RetrySite(..)
-    , acidDB
+    , withAcid
     ) where
 
+import Control.Exception (bracket)
 import Control.Monad
 import Control.Monad.Trans.Except
 import Control.Monad.Reader (asks)
@@ -139,9 +140,6 @@ deriveSafeCopy 0 'base ''IS.IntSet
 deriveSafeCopy 0 'base ''SiteState_v0
 deriveSafeCopy 1 'extension ''SiteState
 
-acidDB :: IO (A.AcidState ScraperState)
-acidDB = A.openLocalStateFrom acidDir M.empty
-
 activeSites :: A.Query ScraperState [String]
 activeSites = asks M.keys
 
@@ -157,7 +155,10 @@ retrySite = modify . M.adjust reset
 
 A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite, 'retrySite]
 
--- Utility type aliases / reexports
+-- Utility
 
 type InternalDB = A.AcidState ScraperState
 type XapianDB   = ReadWriteDB
+
+withAcid :: (InternalDB -> IO a) -> IO a
+withAcid = bracket (A.openLocalStateFrom acidDir M.empty) A.closeAcidState

@@ -2,6 +2,8 @@ module Main where
 
 import Prelude hiding (log)
 
+import Options.Applicative
+import Data.Semigroup ((<>))
 import System.Environment (getArgs)
 import qualified Data.Acid as A
 
@@ -11,32 +13,54 @@ import HsBooru.Types
 import HsBooru.Util
 import HsBooru.Xapian
 
+data ScrapeOpts = ScrapeOpts
+    { extraSites :: [SiteScraper]
+    , update     :: Bool
+    , retry      :: Bool
+    }
+
+scrapeOpts :: Parser ScrapeOpts
+scrapeOpts = ScrapeOpts
+    <$> many (argument readSite ( metavar "SITE.."
+                               <> help "Sites to scrape" ))
+    <*> switch ( long "update"
+              <> short 'u'
+              <> help "Update all previously scraped sites" )
+
+    <*> switch ( long "retry"
+              <> short 'r'
+              <> help "Retry all previously failed posts as well as new posts" )
+
+    where readSite = maybeReader $ \sn -> find (\s -> siteName s == sn) scrapers
+
+opts :: ParserInfo ScrapeOpts
+opts = info (scrapeOpts <**> helper)
+    ( fullDesc
+   <> header "hsbooru - a haskell *booru scraper using xapian"
+   <> progDesc longDesc )
+
+    where longDesc = "Scrape posts from *booru sites, download the images, "
+                  ++ "and store metadata in a xapian DB. Currently supported "
+                  ++ "sites:\n"
+                  ++ unlines [ siteName | SiteScraper{..} <- scrapers ]
+
 main :: IO ()
-main = do
-    st   <- acidDB
-    db   <- either error id <$> runExceptT xapianDB
+main = execParser opts >>= \ScrapeOpts{..} -> withAcid $ \st -> do
+    -- Compute the list of sites to scrape
+    active <- if update then A.query st ActiveSites else pure []
+    let sites = filter (\s -> siteName s `elem` active) scrapers ++ extraSites
 
-    -- To process a site, see if we find a matching scraper, and if so, run it
-    let process site = do
-            let res = find (\s -> siteName s == site) scrapers
-            ss <- requireJust "No scraper found for this site!" $ pure res
-            scrapeSite ss db st
+    -- Make sure this list is non-empty, otherwise fail with a useful error
+    when (null sites) . handleParseResult . Failure $
+        parserFailure defaultPrefs opts (ErrorMsg "No sites specified!") []
 
-    -- When running without a parameter, scrape the previously active
-    -- sites. Otherwise, scrape the names sites
-    args <- getArgs
-    sites <- case args of
-                [] -> A.query st ActiveSites
-                as -> return as
-
-    forM_ sites $ \site -> do
-        res <- runExceptT $ process site
+    db <- either error id <$> runExceptT xapianDB
+    forM_ sites $ \site@SiteScraper{..} -> do
+        when retry $ A.update st (RetrySite siteName)
+        res <- runExceptT $ scrapeSite site db st
         case res of
-            Left e  -> logError site e
+            Left e  -> logError siteName e
             Right _ -> return ()
 
-    -- For cleanup, archive old logs and close the acid DB
-    -- Note: the xapian DB is automatically cleaned up after by the GC
     A.createArchive st
-    A.closeAcidState st
     log "general" "Done scraping."

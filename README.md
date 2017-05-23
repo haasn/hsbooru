@@ -48,17 +48,40 @@ course, trivially change these paths if need be.
 
 ## Usage
 
-Since I'm too lazy to write in-program help or a man page, this is how you use
-it:
+The program has a built-in `--help` command now. Since I'm lazy, I'll just
+copy/paste it:
 
-```bash
-$ hsbooru [sitename...]
+```
+hsbooru - a haskell *booru scraper using xapian
+
+Usage: hsbooru [SITE..] [-u|--update] [-r|--retry]
+  Scrape posts from *booru sites, download the images, and store metadata in a
+  xapian DB. Currently supported sites: gelbooru
+
+Available options:
+  SITE..                   Sites to scrape
+  -u,--update              Update all previously scraped sites
+  -r,--retry               Retry all previously failed posts as well as new
+                           posts
+  -h,--help                Show this help text
+
 ```
 
-If no sitename is specified, it will re-scrape all of the currently active
-sites. So for your cronjob you can just run `hsbooru` and it will continue
-scraping whatever it is you're scraping. If you want to add a new site, or do
-the initial sync of a new site, you'll need to specify the name on the command
-line.
+The semantics of `--update` mean that it will re-scrape every site it
+currently has in its database (i.e. you've already started scraping), but not
+any new sites that get added.
 
-But of course, currently only `gelbooru` is supported...
+So you can put `hsbooru --update` into your daily cronjob, and then it will
+keep re-scraping all of the sites you have listed.
+
+When you specify `--retry`, hsbooru will also reset the "failed" database.
+Normally, if the server fails serving a page, it gets marked off as "failed" -
+since this usually means that the post was deleted - and won't be retried
+again. Specifying `--retry` allows you to override this and retry all of the
+failed posts as well. Might make a good biyearly cron job to retry stuff that
+only failed because of sporadic issues.
+
+**Note**: Individiual page requests will already be retried multiple times, in
+case of connection failure. So this only really helps if the server actually
+answered, but didn't send us the post data for whatever reason (e.g. rate
+limits, transmission got cut off early, etc.)
