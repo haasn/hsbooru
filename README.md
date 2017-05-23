@@ -49,32 +49,27 @@ copy/paste it:
 ```
 hsbooru - a haskell *booru scraper using xapian
 
-Usage: hsbooru [SITE..] [-u|--update] [-r|--retry]
-  Scrape posts from *booru sites, download the images, and store metadata in a
-  xapian DB. Currently supported sites: gelbooru
+Usage: hsbooru COMMAND
 
 Available options:
-  SITE..                   Sites to scrape
-  -u,--update              Update all previously scraped sites
-  -r,--retry               Retry all previously failed posts as well as new
-                           posts
   -h,--help                Show this help text
 
+Available commands:
+  scrape                   Scrape posts from websites
+  update                   Update all previously scraped websites
+  retry                    Reset the failed post database for named sites
 ```
 
-The semantics of `--update` mean that it will re-scrape every site it
-currently has in its database (i.e. you've already started scraping), but not
-any new sites that get added.
+The semantics of `update` mean that it will re-scrape every site it currently
+has in its database (i.e. you've already started scraping at some points). So
+you can use this to make a daily cronjob or something.
 
-So you can put `hsbooru --update` into your daily cronjob, and then it will
-keep re-scraping all of the sites you have listed.
-
-When you specify `--retry`, hsbooru will also reset the "failed" database.
-Normally, if the server fails serving a page, it gets marked off as "failed" -
-since this usually means that the post was deleted - and won't be retried
-again. Specifying `--retry` allows you to override this and retry all of the
-failed posts as well. Might make a good biyearly cron job to retry stuff that
-only failed because of sporadic issues.
+When you specify `retry SITE`, hsbooru will reset the "failed" database for
+that site. Normally, if the server fails serving a page, it gets marked off as
+"failed" - since this usually means that the post was deleted - and won't be
+retried again. Manually running `retry` allows you to clear this database,
+which means that the next scrape will include all of the previously-failed
+posts as well.
 
 **Note**: Individiual page requests will already be retried multiple times, in
 case of connection failure. So this only really helps if the server actually

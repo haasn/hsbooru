@@ -2,6 +2,7 @@
 -- | Module holding site-specific scrapers
 module HsBooru.Sites
     ( scrapers
+    , findSite
     -- Re-exported for convenience (ghci etc.)
     , gelbooru
     ) where
@@ -52,6 +53,9 @@ scrape mgr url s = do
 -- | List of supported website scrapers
 scrapers :: [SiteScraper]
 scrapers = [ gelbooru ]
+
+findSite :: String -> Maybe SiteScraper
+findSite s = find (\ss -> siteName ss == s) scrapers
 
 -- Website-specific scrapers
 

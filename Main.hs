@@ -1,63 +1,37 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Main where
 
 import Prelude hiding (log)
 
+import Data.Monoid ((<>))
 import Options.Applicative
-import Data.Semigroup ((<>))
 import System.Environment (getArgs)
+
 import qualified Data.Acid as A
 
 import HsBooru.Conf
 import HsBooru.Scraper
 import HsBooru.Sites
 import HsBooru.Types
-import HsBooru.Util
+import HsBooru.Util hiding (retry)
 import HsBooru.Xapian
 
-data ScrapeOpts = ScrapeOpts
-    { extraSites :: [SiteScraper]
-    , update     :: Bool
-    , retry      :: Bool
-    }
+type Command = Mod CommandFields (InternalDB -> IO ())
 
-scrapeOpts :: Parser ScrapeOpts
-scrapeOpts = ScrapeOpts
-    <$> many (argument readSite ( metavar "SITE.."
-                               <> help "Sites to scrape" ))
-    <*> switch ( long "update"
-              <> short 'u'
-              <> help "Update all previously scraped sites" )
+siteOpt :: Parser SiteScraper
+siteOpt = argument readSite $ metavar "SITE" <> help "booru name"
+    where readSite = maybeReader findSite <|> readerError err
+          err = "Invalid site name. Currently supported sites: "
+             ++ unwords (map siteName scrapers)
 
-    <*> switch ( long "retry"
-              <> short 'r'
-              <> help "Retry all previously failed posts as well as new posts" )
+siteNameOpt :: Parser String
+siteNameOpt = siteName <$> siteOpt
 
-    where readSite = maybeReader $ \sn -> find (\s -> siteName s == sn) scrapers
-
-opts :: ParserInfo ScrapeOpts
-opts = info (scrapeOpts <**> helper)
-    ( fullDesc
-   <> header "hsbooru - a haskell *booru scraper using xapian"
-   <> progDesc longDesc )
-
-    where longDesc = "Scrape posts from *booru sites, download the images, "
-                  ++ "and store metadata in a xapian DB. Currently supported "
-                  ++ "sites:\n"
-                  ++ unlines [ siteName | SiteScraper{..} <- scrapers ]
-
-main :: IO ()
-main = execParser opts >>= \ScrapeOpts{..} -> withAcid $ \st -> do
-    -- Compute the list of sites to scrape
-    active <- if update then A.query st ActiveSites else pure []
-    let sites = filter (\s -> siteName s `elem` active) scrapers ++ extraSites
-
-    -- Make sure this list is non-empty, otherwise fail with a useful error
-    when (null sites) . handleParseResult . Failure $
-        parserFailure defaultPrefs opts (ErrorMsg "No sites specified!") []
-
+-- `scrape` command
+scrape :: [SiteScraper] -> InternalDB -> IO ()
+scrape sites st = do
     db <- either error id <$> runExceptT (xapianDB xapianDir)
     forM_ sites $ \site@SiteScraper{..} -> do
-        when retry $ A.update st (RetrySite siteName)
         res <- runExceptT $ scrapeSite site db st
         case res of
             Left e  -> logError siteName e
@@ -65,3 +39,40 @@ main = execParser opts >>= \ScrapeOpts{..} -> withAcid $ \st -> do
 
     A.createArchive st
     log "general" "Done scraping."
+
+scrapeCmd :: Command
+scrapeCmd = command "scrape" . info (scrape <$> some siteOpt) $
+    progDesc "Scrape posts from websites"
+
+-- `update` command
+update :: InternalDB -> IO ()
+update st = do
+    sites <- A.query st ActiveSites
+    scrape [ ss | ss <- scrapers, siteName ss `elem` sites ] st
+
+updateCmd :: Command
+updateCmd = command "update" . info (pure update) $
+    progDesc "Update all previously scraped websites"
+
+-- `retry` command
+retry :: [String] -> InternalDB -> IO ()
+retry ss st = forM_ ss $ A.update st . RetrySite
+
+retryCmd :: Command
+retryCmd = command "retry" . info (retry <$> some siteNameOpt) $
+    progDesc "Reset the failed post database for named sites"
+
+-- Main
+
+opts :: ParserInfo (InternalDB -> IO ())
+opts = info (hsubparser commands <**> helper) $
+    fullDesc
+ <> header "hsbooru - a haskell *booru scraper using xapian"
+
+    where commands = scrapeCmd <> updateCmd <> retryCmd
+
+main :: IO ()
+main = customExecParser parserOpts opts >>= withAcid
+    where parserOpts = prefs $ showHelpOnError
+                            <> showHelpOnEmpty
+                            <> multiSuffix ".."
