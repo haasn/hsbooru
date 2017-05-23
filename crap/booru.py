@@ -1,13 +1,5 @@
 import argparse
-
-# Filthy work-around for braindead breakage
-import sys
-sys.path.append('/usr/lib/python3.5/site-packages/xapian')
 from xapian import *
-
-# Fix python unicode breakage
-import codecs
-sys.stdout = codecs.getwriter('utf8')(sys.stdout)
 
 # Global constants
 dbPath = "/booru/"
@@ -50,11 +42,12 @@ def getVal(doc, slot):
     return int(sortable_unserialise(doc.get_value(slot)))
 
 def showTerm(t):
-    t = t.decode('utf-8')
+    t = t.decode()
 
     for p, ns in termPrefixes:
         if t[0] == p:
             t = ns[0]+':'+t[1:]
+            break
 
     return t
 
@@ -104,7 +97,7 @@ def showInfo(mset, args):
 
         print('-- Document', doc.get_docid(), '--')
         for v, fs in strValues:
-            print(fs[0]+':'+doc.get_value(v).decode('utf-8'))
+            print(fs[0]+':'+doc.get_value(v).decode())
         for v, fs in rangeValues:
             print(fs[0]+':'+str(getVal(doc, v)))
 
