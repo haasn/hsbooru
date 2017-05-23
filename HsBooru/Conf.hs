@@ -13,8 +13,10 @@ xapianDir   = dbDir </> "xapian"
 acidDir     = dbDir </> "acid"
 
 -- Some misc tuning options
-mgrOpts     = tlsManagerSettings { managerConnCount = max 10 threadCount }
-retryCount  = 5 -- ^ How often to retry each request before giving up
+mgrOpts     = tlsManagerSettings { managerConnCount = max 10 threadCount
+                                 , managerRetryableException = const True }
+
+retryCount  = 3 -- ^ How often to retry each request before giving up
 
 -- | How many posts to fetch before committing them all to the database.
 -- Increasing this can improve throughput and reduce database overhead at the

@@ -8,6 +8,7 @@ module HsBooru.Scraper
 
 import Prelude hiding (log)
 
+import Control.Exception (try)
 import qualified Data.Acid as A
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.IntervalSet as IS
@@ -28,11 +29,13 @@ type URL = String
 fetch :: Manager -> URL -> ExceptT String IO LBS.ByteString
 fetch mgr url = do
     req <- parseRequest url
-    res <- ioCatch $ httpLbs req mgr
+    res <- requireRight . tryHttp $ httpLbs req mgr
     let status = responseStatus res
     unless (statusIsSuccessful status) $
         throwE $ "Error downloading " ++ url ++ ": " ++ show status
     return $ responseBody res
+  where tryHttp :: IO a -> IO (Either HttpException a)
+        tryHttp = try
 
 -- | Fetch a URL and save it to a file
 download :: Manager -> URL -> FilePath -> ExceptT String IO ()
