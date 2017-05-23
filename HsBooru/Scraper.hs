@@ -50,7 +50,11 @@ fetchID :: SiteScraper -> Manager -> Int -> ExceptT String IO (Maybe Post)
 fetchID SiteScraper{..} mgr id = do
     post <- scrapeID mgr id
     forM_ post $ requireImage mgr
+    case post of
+        Just p  -> io.log siteName $ showPost p
+        Nothing -> io.logError siteName $ "Post " ++ show id ++ " deleted!"
     return post
+  where showPost Post{..} = unwords [ show siteID, fileURL, unwords tags ]
 
 -- | Core scraping loop that runs per-thread
 runScraper :: SiteScraper -> Manager -> XapianDB -> InternalDB
@@ -61,22 +65,15 @@ runScraper site@SiteScraper{..} mgr db st posts = do
     io.log siteName $ "Scraping posts " ++ show scrapeIDs
     res <- forM scrapeIDs $ retry retryCount . fetchID site mgr
 
-    let process (id, post) = case post of
-          Nothing -> do
-            io.logError siteName $ "Post " ++ show id ++ " deleted!"
-            return $ postFailed id
+    let process (id, Nothing)   = return $ postFailed id
+        process (id, Just post) = postSuccess id <$ xapianStore db post
 
-          Just post -> do
-            runXM $ do xapianStore db post
-            io.log siteName $ showPost post
-            return $ postSuccess id
+        results = traverse process $ zip scrapeIDs res
 
-    res <- fmap mconcat . traverse process $ zip scrapeIDs res
-    runXM $ commit db
-    ioCatch . A.update st $ UpdateSite siteName res
-    runScraper site mgr db st $ posts `IS.difference` scrapedMap res
-
-    where showPost Post{..} = unwords [ show siteID, fileURL, unwords tags ]
+    io.log siteName $ "Finished scraping batch, commiting to DB"
+    newPosts <- runXM $ mconcat <$> results <* commit db
+    ioCatch . A.update st $ UpdateSite siteName newPosts
+    runScraper site mgr db st $ posts `IS.difference` scrapedMap newPosts
 
 -- | Fetch all necessary metadata and spawn a bunch of scraper threads
 scrapeSite :: SiteScraper -> XapianDB -> InternalDB -> ExceptT String IO ()
