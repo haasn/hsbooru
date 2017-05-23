@@ -88,8 +88,10 @@ scrapeSite site@SiteScraper{..} db st = do
     let new = siteRange `IS.difference` scrapedMap siteState
         threads = subdivide new [1 .. threadCount]
 
-    forConcurrentlyE threads $ \(ps, tid) -> do
-        io.log (siteName ++ "/" ++ show tid) $ show (IS.findMin ps, IS.findMax ps)
-        runScraper site mgr db st ps
+    forConcurrentlyE threads $ \(ps, tid) ->
+        unless (IS.null ps) $ do
+            let range = (IS.findMin ps, IS.findMax ps)
+            io.log (siteName ++ "/" ++ show tid) $ show range
+            runScraper site mgr db st ps
 
     ioCatch $ A.createCheckpoint st
