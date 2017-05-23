@@ -18,12 +18,15 @@ retryCount  = 5 -- ^ How often to retry each request before giving up
 
 -- | How many posts to fetch before committing them all to the database.
 -- Increasing this can improve throughput and reduce database overhead at the
--- cost of losing more work when you interrupt the program prematuraly
+-- cost of losing more work when you interrupt the program prematuraly.
 batchSize   = 200
 
 -- | How many scraper threads to run in parallel. Increasing this improves
 -- performance, but if you take it too far you will probably get rate limited
--- by the server, at least gelbooru does this. So keep it safe
+-- by the server, at least gelbooru does this. So keep it safe. Incidentally,
+-- this still works if the program is running on a single core only, it will
+-- just keep open four connections to the server concurrently instead of
+-- processing each request in lockstep.
 threadCount = 4
 
 -- Term prefix mapping, for reusable tags
