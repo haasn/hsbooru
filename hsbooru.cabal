@@ -1,4 +1,4 @@
-name:                HsBooru
+name:                hsbooru
 version:             2.2.0.0
 synopsis:            booru scraper based on xapian
 license:             GPL-3
@@ -41,26 +41,26 @@ executable hsbooru
                      , ForeignFunctionInterface
                      , GeneralizedNewtypeDeriving
 
-  build-depends:       base >=4.9 && <4.10
-                     , async >=2.1 && <2.2
-                     , transformers >=0.5 && <0.6
-                     , mtl >=2.2 && <2.3
-                     , data-default >=0.7 && <0.8
-                     , time >=1.6 && <1.7
-                     , safecopy >=0.9 && <0.10
-                     , split >=0.2 && <0.3
-                     , acid-state >=0.14 && <0.15
-                     , utf8-string >=1.0 && <1.1
-                     , bytestring >=0.10 && <0.11
-                     , intset >=0.1 && <0.2
-                     , containers >=0.5 && <0.6
-                     , text >=1.2 && <1.3
-                     , http-client >=0.5 && <0.6
-                     , http-client-tls >=0.3 && <0.4
-                     , http-types >=0.9 && <0.10
-                     , directory >=1.3 && <1.4
-                     , filepath >=1.4 && <1.5
-                     , scalpel-core >=0.5 && <0.6
-                     , optparse-applicative >=0.13 && <0.14
+  build-depends:       base >=4.8
+                     , async >=2.1
+                     , transformers >=0.4
+                     , mtl >=2.2
+                     , data-default >=0.7
+                     , time >=1.5
+                     , safecopy >=0.9
+                     , split >=0.2
+                     , acid-state >=0.14
+                     , utf8-string >=1.0
+                     , bytestring >=0.9
+                     , intset >=0.1
+                     , containers >=0.4
+                     , text >=1.2
+                     , http-client >=0.5
+                     , http-client-tls >=0.3
+                     , http-types >=0.9
+                     , directory >=1.2
+                     , filepath >=1.4
+                     , scalpel-core >=0.5
+                     , optparse-applicative >=0.13
 
   default-language:    Haskell2010
