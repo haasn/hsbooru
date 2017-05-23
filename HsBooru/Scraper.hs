@@ -88,8 +88,13 @@ scrapeSite site@SiteScraper{..} db st = do
     siteState <- io $ A.query st (GetSite siteName)
     siteRange <- idRange mgr
 
-    let new = siteRange `IS.difference` scrapedMap siteState
+    let known = scrapedMap siteState
+        new = siteRange `IS.difference` known
         threads = subdivide new [1 .. threadCount]
+
+    io.log siteName $ "Have: " ++ show (IS.size known)
+                   ++      "/" ++ show (IS.size siteRange)
+                   ++ " New: " ++ show (IS.size new)
 
     forConcurrentlyE threads $ \(ps, tid) ->
         unless (IS.null ps) $ do
