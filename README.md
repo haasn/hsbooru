@@ -39,12 +39,8 @@ minimalistic bindings for xapian instead, since my needs are very basic.
 
 ## Configuration
 
-There are some tunables near the beginning of the code. You may want to play
-around with the `threadCount`, especially on systems with fewer cores. You might
-also want to drop down the `batchSize` to compensate.
-
-Everything is stored relative to `dbDir`, including the images. You can, of
-course, trivially change these paths if need be.
+There are some tunables in `HsBooru/Conf.hs`, in lieau of a more sensible
+configuration system.
 
 ## Usage
 
