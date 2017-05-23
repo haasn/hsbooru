@@ -7,8 +7,9 @@ module HsBooru.Types
     , module Control.Monad.Trans.Except
     , module Data.Default
     , module Data.List
-    , module Data.List.Split
     , module Data.Maybe
+    , module Data.Monoid
+    , module Data.Text
     , module Network.HTTP.Client
 
     -- | Main types
@@ -43,6 +44,8 @@ import Data.Default
 import Data.List
 import Data.List.Split
 import Data.Maybe
+import Data.Monoid
+import Data.Text (Text)
 import Network.HTTP.Client
 
 import qualified Data.Acid as A
@@ -58,10 +61,10 @@ data Post = Post
     , rating   :: !Rating
     , uploader :: !Int
     , score    :: !Int
-    , source   :: !(Maybe String)
-    , fileURL  :: !String
-    , fileName :: !String
-    , tags     :: ![String]
+    , source   :: !(Maybe Text)
+    , fileURL  :: !Text
+    , fileName :: !Text
+    , tags     :: ![Text]
     } deriving Show
 
 data Rating = Safe | Questionable | Explicit

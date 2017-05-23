@@ -11,6 +11,7 @@ import Prelude hiding (log)
 import qualified Data.Acid as A
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.IntervalSet as IS
+import qualified Data.Text as T
 
 import Network.HTTP.Types.Status
 import System.Directory (doesFileExist)
@@ -40,9 +41,9 @@ download mgr url path = fetch mgr url >>= ioCatch . LBS.writeFile path
 -- | Checks if an image is already downloaded, and downloads it if it isn't
 requireImage :: Manager -> Post -> ExceptT String IO ()
 requireImage mgr Post{..} = do
-    let filePath = imageDir </> fileName
+    let filePath = imageDir </> T.unpack fileName
     e <- ioCatch $ doesFileExist filePath
-    unless e $ download mgr fileURL filePath
+    unless e $ download mgr (T.unpack fileURL) filePath
 
 -- | Fetch a single post ID and download the corresponding image. Returns
 -- Nothing if we got a reply but the post doesn't seem to exist
@@ -54,7 +55,9 @@ fetchID SiteScraper{..} mgr id = do
         Just p  -> io.log siteName $ showPost p
         Nothing -> io.logError siteName $ "Post " ++ show id ++ " deleted!"
     return post
-  where showPost Post{..} = unwords [ show siteID, fileURL, unwords tags ]
+  where showPost Post{..} = unwords [ show siteID
+                                    , T.unpack fileURL
+                                    , T.unpack $ T.unwords tags ]
 
 -- | Core scraping loop that runs per-thread
 runScraper :: SiteScraper -> Manager -> XapianDB -> InternalDB

@@ -22,6 +22,9 @@ import Control.Monad.Trans.Except
 import Control.Monad.Trans.Cont
 import Control.Monad.IO.Class
 
+import Data.Text (Text)
+import qualified Data.Text.Foreign as T (withCStringLen)
+
 import Foreign
 import Foreign.C
 import System.IO.Unsafe (unsafePerformIO)
@@ -59,10 +62,10 @@ type ValueNumber = CUInt
 foreign import ccall unsafe "doc_add_val_str"
     cx_doc_add_val_str :: Ptr CXapianDoc -> CUInt -> CString -> CSize -> IO ()
 
-addValStr :: Document -> ValueNumber -> String -> XapianM ()
+addValStr :: Document -> ValueNumber -> Text -> XapianM ()
 addValStr doc valueno val = io . evalContT $ do
     pdoc <- ContT $ withForeignPtr doc
-    (pval, len) <- ContT $ withCStringLen val
+    (pval, len) <- ContT $ T.withCStringLen val
     io $ cx_doc_add_val_str pdoc valueno pval (fromIntegral len)
 
 foreign import ccall unsafe "doc_add_val_dbl"
@@ -75,10 +78,10 @@ addValDouble doc valueno val = io . withForeignPtr doc $ \pdoc -> do
 foreign import ccall unsafe "doc_add_term"
     cx_doc_add_term :: Ptr CXapianDoc -> CString -> CSize -> IO ()
 
-addTerm :: Document -> String -> XapianM ()
+addTerm :: Document -> Text -> XapianM ()
 addTerm doc tag = io . evalContT $ do
     pdoc <- ContT $ withForeignPtr doc
-    (ptag, len) <- ContT $ withCStringLen tag
+    (ptag, len) <- ContT $ T.withCStringLen tag
     io $ cx_doc_add_term pdoc ptag (fromIntegral len)
 
 -- Database and related functions

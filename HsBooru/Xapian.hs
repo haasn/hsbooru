@@ -15,6 +15,7 @@ import Data.Foldable
 import System.IO.Unsafe (unsafePerformIO)
 import System.FilePath.Posix (takeExtension)
 import qualified Data.ByteString.UTF8 as UTF8
+import qualified Data.Text as T
 
 import HsBooru.Conf
 import HsBooru.Types
@@ -23,13 +24,13 @@ import HsBooru.Xapian.FFI
 
 -- Utilities
 
-addTag :: Document -> String -> String -> XapianM ()
-addTag doc prefix = addTerm doc . (prefix ++) . map fix
+addTag :: Document -> Text -> Text -> XapianM ()
+addTag doc prefix = addTerm doc . (prefix <>) . T.map fix
     where fix ' ' = '_'
           fix c   = toLower c
 
-strVal :: Document -> ValueNumber -> String -> XapianM ()
-strVal doc val = addValStr doc val . map toLower
+strVal :: Document -> ValueNumber -> Text -> XapianM ()
+strVal doc val = addValStr doc val . T.map toLower
 
 encVal :: Integral a => Document -> ValueNumber -> a -> XapianM ()
 encVal doc val = addValDouble doc val . fromIntegral
@@ -44,12 +45,15 @@ xapianStore db Post{..} = do
     strVal doc fileURLSlot  fileURL
     forM_ source $ strVal doc sourceSlot
 
-    addTag doc booruPrefix    $ booru
-    addTag doc siteIDPrefix   $ show siteID
-    addTag doc uploaderPrefix $ show uploader
-    addTag doc ratingPrefix   $ show rating
+    addTag doc booruPrefix    $ T.pack booru
+    addTag doc siteIDPrefix   $ T.pack (show siteID)
+    addTag doc uploaderPrefix $ T.pack (show uploader)
+    addTag doc ratingPrefix   $ T.pack (show rating)
     addTag doc filePrefix     $ fileName
-    addTag doc extPrefix      $ drop 1 (takeExtension fileName)
+    addTag doc extPrefix      $ getExt fileName
     forM_ tags $ addTag doc tagPrefix
 
     addDocument db doc
+
+getExt :: Text -> Text
+getExt = T.pack . drop 1 . takeExtension . T.unpack

@@ -1,4 +1,4 @@
-{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE NoMonomorphismRestriction, OverloadedStrings #-}
 -- | Global configuration and constants
 module HsBooru.Conf where
 
