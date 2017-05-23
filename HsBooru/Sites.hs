@@ -3,7 +3,7 @@
 module HsBooru.Sites
     ( scrapers
     , findSite
-    -- Re-exported for convenience (ghci etc.)
+    -- ** Re-exported for convenience (ghci etc.)
     , gelbooru
     ) where
 

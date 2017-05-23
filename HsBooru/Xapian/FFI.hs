@@ -2,14 +2,14 @@
 module HsBooru.Xapian.FFI
     ( XapianM
     , runXM
-    -- Document
+    -- * Document
     , Document
     , ValueNumber
     , newDoc
     , addValStr
     , addValDouble
     , addTerm
-    -- Database
+    -- * Database
     , XapianDB
     , xapianDB
     , addDocument

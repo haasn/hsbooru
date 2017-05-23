@@ -1,9 +1,9 @@
 {-# LANGUAGE TemplateHaskell, TypeFamilies, FlexibleInstances #-}
 -- | Convenience module for types and instances, also re-exports helpful common
 -- imports
-module HsBooru.Types
-    -- | Module re-exports for convenience
-    ( module Control.Monad
+module HsBooru.Types (
+    -- * Module re-exports for convenience
+      module Control.Monad
     , module Control.Monad.Trans.Except
     , module Data.Default
     , module Data.List
@@ -12,20 +12,20 @@ module HsBooru.Types
     , module Data.Text
     , module Network.HTTP.Client
 
-    -- | Main types
+    -- * Main types
     , Post(..)
     , Rating(..)
     , SiteScraper(..)
     , SiteState(..)
     , InternalDB
 
-    -- | PostSets and utilities
+    -- * PostSets and utilities
     , PostSet
     , postSuccess
     , postFailed
     , subdivide
 
-    -- | AcidState helpers/queries
+    -- * AcidState helpers/queries
     , ActiveSites(..)
     , GetSite(..)
     , UpdateSite(..)
