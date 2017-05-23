@@ -17,7 +17,11 @@ acidDir     = dbDir </> "acid"
 mgrOpts     = tlsManagerSettings { managerConnCount = max 10 threadCount
                                  , managerRetryableException = const True }
 
-retryCount  = 3 -- How often to retry each request before giving up
+-- How often to retry each request before giving up. Also how often to retry
+-- each site, in case an iteration encountered some sort of failure. In
+-- general, how often to retry actions that could fail before giving up on
+-- them.
+retryCount  = 3
 
 -- How many posts to fetch before committing them all to the database.
 -- Increasing this can improve throughput and reduce database overhead at the

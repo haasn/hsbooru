@@ -13,7 +13,7 @@ import HsBooru.Conf
 import HsBooru.Scraper
 import HsBooru.Sites
 import HsBooru.Types
-import HsBooru.Util hiding (retry)
+import HsBooru.Util
 import HsBooru.Xapian
 
 type Command = Mod CommandFields (InternalDB -> IO ())
@@ -32,7 +32,7 @@ scrape :: [SiteScraper] -> InternalDB -> IO ()
 scrape sites st = do
     db <- either error id <$> runExceptT (xapianDB xapianDir)
     forM_ sites $ \site@SiteScraper{..} -> do
-        res <- runExceptT $ scrapeSite site db st
+        res <- runExceptT . retry retryCount $ scrapeSite site db st
         case res of
             Left e  -> logError siteName e
             Right _ -> return ()
@@ -55,11 +55,11 @@ updateCmd = command "update" . info (pure update) $
     progDesc "Update all previously scraped websites"
 
 -- `retry` command
-retry :: [String] -> InternalDB -> IO ()
-retry ss st = forM_ ss $ A.update st . RetrySite
+retrySite :: [String] -> InternalDB -> IO ()
+retrySite ss st = forM_ ss $ A.update st . RetrySite
 
 retryCmd :: Command
-retryCmd = command "retry" . info (retry <$> some siteNameOpt) $
+retryCmd = command "retry" . info (retrySite <$> some siteNameOpt) $
     progDesc "Reset the failed post database for named sites"
 
 -- Main
