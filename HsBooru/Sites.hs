@@ -1,6 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | Module holding site-specific scrapers
-module HsBooru.Sites (scrapers) where
+module HsBooru.Sites
+    ( scrapers
+    -- Re-exported for convenience (ghci etc.)
+    , gelbooru
+    ) where
 
 import Prelude hiding (log)
 
