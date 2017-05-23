@@ -125,12 +125,19 @@ postFailed  id = def { scrapedMap = IS.singleton id }
 subdivide :: PostSet -> [a] -> [(PostSet, a)]
 subdivide _ [ ] = []
 subdivide s [a] = [(s, a)]
-subdivide ss as = subdivide (IS.insert mid sl) al ++ subdivide sr ar
-    where -- split the post set by estimating the center
-          (sl, sr) = IS.split mid ss
-          mid = (IS.findMin ss + IS.findMax ss) `div` 2
-          -- split the value set by taking every other element
+subdivide ss as = subdivide sl al ++ subdivide sr ar
+    where (sl, sr) = splitIS ss
           [al, ar] = transpose $ chunksOf 2 as
+
+-- Try to fairly split an intervalset in half by splitting along the estimated
+-- median
+splitIS :: PostSet -> (PostSet, PostSet)
+splitIS ps | IS.null ps = (ps, ps)
+splitIS ps = (fix left, right)
+    where (left, right) = IS.split mid ps
+          mid = (IS.findMin ps + IS.findMax ps) `div` 2
+          fix | mid `IS.member` ps = IS.insert mid
+              | otherwise = id
 
 -- Can't be a newtype due to overly strict nominal role constraints on SafeCopy
 type ScraperState = M.Map String SiteState
