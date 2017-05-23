@@ -12,6 +12,7 @@ import qualified Data.Acid as A
 import HsBooru.Conf
 import HsBooru.Scraper
 import HsBooru.Sites
+import HsBooru.Stats
 import HsBooru.Types
 import HsBooru.Util
 import HsBooru.Xapian
@@ -62,6 +63,17 @@ retryCmd :: Command
 retryCmd = command "retry" . info (retrySite <$> some siteNameOpt) $
     progDesc "Reset the failed post database for named sites"
 
+-- `info` command
+siteInfo :: String -> InternalDB -> IO ()
+siteInfo site st = do
+    ss <- A.query st (GetSite site)
+    putStrLn $ "Stats for site `" ++ site ++ "`:\n"
+    printStats ss
+
+infoCmd :: Command
+infoCmd = command "info" . info (siteInfo <$> siteNameOpt) $
+    progDesc "Show some statistics about a named site"
+
 -- Main
 
 opts :: ParserInfo (InternalDB -> IO ())
@@ -69,7 +81,7 @@ opts = info (hsubparser commands <**> helper) $
     fullDesc
  <> header "hsbooru - a haskell *booru scraper using xapian"
 
-    where commands = scrapeCmd <> updateCmd <> retryCmd
+    where commands = scrapeCmd <> updateCmd <> retryCmd <> infoCmd
 
 main :: IO ()
 main = customExecParser parserOpts opts >>= withAcid

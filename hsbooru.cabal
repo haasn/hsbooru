@@ -20,6 +20,7 @@ executable hsbooru
   other-modules:       HsBooru.Conf
                      , HsBooru.Scraper
                      , HsBooru.Sites
+                     , HsBooru.Stats
                      , HsBooru.Types
                      , HsBooru.Util
                      , HsBooru.Xapian
@@ -33,6 +34,7 @@ executable hsbooru
 
   default-extensions:  RecordWildCards
                      , LambdaCase
+                     , BangPatterns
 
   other-extensions:    TemplateHaskell
                      , TypeFamilies
@@ -40,6 +42,7 @@ executable hsbooru
                      , OverloadedStrings
                      , ForeignFunctionInterface
                      , GeneralizedNewtypeDeriving
+                     , CPP
 
   build-depends:       base >=4.8
                      , async >=2.1
