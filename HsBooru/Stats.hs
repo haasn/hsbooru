@@ -27,8 +27,8 @@ printStats site@SiteState{..} = do
     isStats scrapedMap
     printf "\n"
 
-    printf "## failedMap stats:\n"
-    isStats failedMap
+    printf "## presentMap stats:\n"
+    isStats presentMap
 
 (//) :: (Integral a, Integral b) => a -> b -> Double
 a // b = fromIntegral a / fromIntegral b
