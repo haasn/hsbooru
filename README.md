@@ -11,8 +11,9 @@ There's a .cabal now, but here are some of the important dependencies
 
 - **scalpel-core**: used for processing HTML
 - **http-client**: used for web requests
-- **intset**: used to store efficient interval sets
+- **intset**: used to store efficient interval sets (see below)
 - **acid-state**: used for the internal state / database
+- **optparse-applicative**: used for the CLI
 
 ### Note on bitrot
 
