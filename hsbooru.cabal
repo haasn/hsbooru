@@ -1,5 +1,5 @@
 name:                HsBooru
-version:             2.1.0.0
+version:             2.2.0.0
 synopsis:            booru scraper based on xapian
 license:             GPL-3
 license-file:        LICENSE
@@ -13,8 +13,7 @@ cabal-version:       >=1.10
 description:
 
     Scraper for *booru websites based on xapian. Currently only supports
-    gelbooru, but it would be very easy to extend. Note: Depends on patched
-    versions of the bitrotten Xapian-Haskell bindings.
+    gelbooru, but it would be very easy to extend.
 
 executable hsbooru
   main-is:             Main.hs
@@ -24,6 +23,11 @@ executable hsbooru
                      , HsBooru.Types
                      , HsBooru.Util
                      , HsBooru.Xapian
+                     , HsBooru.Xapian.FFI
+
+  c-sources:           HsBooru/Xapian/cbits.cc
+  cc-options:          -Wall -fPIC
+  extra-libraries:     xapian, stdc++
 
   ghc-options:         -O2 -threaded -rtsopts -dynamic
 
@@ -34,6 +38,8 @@ executable hsbooru
                      , TypeFamilies
                      , FlexibleInstances
                      , OverloadedStrings
+                     , ForeignFunctionInterface
+                     , GeneralizedNewtypeDeriving
 
   build-depends:       base >=4.9 && <4.10
                      , async >=2.1 && <2.2
@@ -52,7 +58,6 @@ executable hsbooru
                      , http-client >=0.5 && <0.6
                      , http-client-tls >=0.3 && <0.4
                      , http-types >=0.9 && <0.10
-                     , Xapian-Haskell >=0.0 && <0.1
                      , directory >=1.3 && <1.4
                      , filepath >=1.4 && <1.5
                      , scalpel-core >=0.5 && <0.6

@@ -17,7 +17,6 @@ module HsBooru.Types
     , SiteScraper(..)
     , SiteState(..)
     , InternalDB
-    , XapianDB
 
     -- | PostSets and utilities
     , PostSet
@@ -45,7 +44,6 @@ import Data.List
 import Data.List.Split
 import Data.Maybe
 import Network.HTTP.Client
-import Search.Xapian (ReadWriteDB)
 
 import qualified Data.Acid as A
 import qualified Data.IntervalSet as IS
@@ -158,7 +156,6 @@ A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite, 'retrySite]
 -- Utility
 
 type InternalDB = A.AcidState ScraperState
-type XapianDB   = ReadWriteDB
 
 withAcid :: (InternalDB -> IO a) -> IO a
 withAcid = bracket (A.openLocalStateFrom acidDir M.empty) A.closeAcidState

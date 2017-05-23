@@ -7,6 +7,7 @@ import Data.Semigroup ((<>))
 import System.Environment (getArgs)
 import qualified Data.Acid as A
 
+import HsBooru.Conf
 import HsBooru.Scraper
 import HsBooru.Sites
 import HsBooru.Types
@@ -54,7 +55,7 @@ main = execParser opts >>= \ScrapeOpts{..} -> withAcid $ \st -> do
     when (null sites) . handleParseResult . Failure $
         parserFailure defaultPrefs opts (ErrorMsg "No sites specified!") []
 
-    db <- either error id <$> runExceptT xapianDB
+    db <- either error id <$> runExceptT (xapianDB xapianDir)
     forM_ sites $ \site@SiteScraper{..} -> do
         when retry $ A.update st (RetrySite siteName)
         res <- runExceptT $ scrapeSite site db st

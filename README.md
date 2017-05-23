@@ -13,29 +13,28 @@ There's a .cabal now, but here are some of the important dependencies
 - **http-client**: used for web requests
 - **intset**: used to store efficient interval sets
 - **acid-state**: used for the internal state / database
-- **Xapian-Haskell**: used to store post metadata and tag search
 
 ### Note on bitrot
 
-Both Xapian-Haskell and intset currently fail to build/work in their current
-release versions. I use custom patches for both. If you really want to use
-this, then you need to apply them yourself:
+This uses Data.IntervalSet, which currently fails to build on modern GHC
+versions in its release version. There's an open pull request that fixes it,
+unmerged for reasons unknown to me. You can find the necessary patch here:
 
 - https://github.com/pxqr/intset/pull/3
-- https://github.com/haasn/gentoo-overlay/blob/master/dev-haskell/xapian-haskell/files/xapian-haskell.patch
 
-If you're a gentoo user, you can use my ebuilds for these:
+If you're a gentoo user, you can use my ebuild for this:
 
 - https://github.com/haasn/gentoo-overlay/tree/master/dev-haskell/intset
-- https://github.com/haasn/gentoo-overlay/tree/master/dev-haskell/xapian-haskell
 
-I'd also strongly avoid trying to use xapian-haskell or relying on it too
-much, it's stupidly bitrotten and broken to the core; half the stuff just
-plain doesn't work, others segfault, etc.
+You might be wondering why I switched away from `Xapian-Haskell` and started
+using my own xapian C shim; the answer is simple: `Xapian-Haskell` is
+bitrotten to hell and back and I don't even know where to begin fixing it. It
+also has a tendency to silently corrupt stuff because of treading
+`std::string`s like `const char *`s and vice versa.
 
-The few functions I access seem to sort of work. One of my next goals with
-this program is to move away from xapian-haskell and maybe write my own
-minimalistic bindings for xapian instead, since my needs are very basic.
+So to avoid all of these issues, and avoid reliance on a bitrotten library
+that needs custom patches to build anyway, I've included a small wrapper for
+the (very few) functions I actually need.
 
 ## Configuration
 
