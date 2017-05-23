@@ -23,8 +23,8 @@ import HsBooru.Xapian.FFI
 
 -- Utilities
 
-addTag :: Document -> String -> XapianM ()
-addTag doc = addTerm doc . map fix
+addTag :: Document -> String -> String -> XapianM ()
+addTag doc prefix = addTerm doc . (prefix ++) . map fix
     where fix ' ' = '_'
           fix c   = toLower c
 
@@ -44,12 +44,12 @@ xapianStore db Post{..} = do
     strVal doc fileURLSlot  fileURL
     forM_ source $ strVal doc sourceSlot
 
-    addTag doc $ booruPrefix    ++ booru
-    addTag doc $ siteIDPrefix   ++ show siteID
-    addTag doc $ uploaderPrefix ++ show uploader
-    addTag doc $ ratingPrefix   ++ show rating
-    addTag doc $ filePrefix     ++ fileName
-    addTag doc $ extPrefix      ++ drop 1 (takeExtension fileName)
-    forM_ tags $ addTag doc . (tagPrefix ++)
+    addTag doc booruPrefix    $ booru
+    addTag doc siteIDPrefix   $ show siteID
+    addTag doc uploaderPrefix $ show uploader
+    addTag doc ratingPrefix   $ show rating
+    addTag doc filePrefix     $ fileName
+    addTag doc extPrefix      $ drop 1 (takeExtension fileName)
+    forM_ tags $ addTag doc tagPrefix
 
     addDocument db doc
