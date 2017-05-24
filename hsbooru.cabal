@@ -15,22 +15,25 @@ description:
     Scraper for *booru websites based on xapian. Currently only supports
     gelbooru, but it would be very easy to extend.
 
-executable hsbooru
-  main-is:             Main.hs
-  other-modules:       HsBooru.Conf
+library
+  exposed:             False
+  default-language:    Haskell2010
+  ghc-options:         -O2
+  hs-source-dirs:      src
+
+  exposed-modules:     HsBooru.Conf
                      , HsBooru.Scraper
                      , HsBooru.Sites
                      , HsBooru.Stats
                      , HsBooru.Types
                      , HsBooru.Util
                      , HsBooru.Xapian
-                     , HsBooru.Xapian.FFI
 
-  c-sources:           HsBooru/Xapian/cbits.cc
+  other-modules:       HsBooru.Xapian.FFI
+
+  c-sources:           src/HsBooru/Xapian/cbits.cc
   cc-options:          -Wall -fPIC
   extra-libraries:     xapian, stdc++
-
-  ghc-options:         -O2 -threaded -rtsopts -dynamic
 
   default-extensions:  RecordWildCards
                      , LambdaCase
@@ -64,6 +67,30 @@ executable hsbooru
                      , directory >=1.2
                      , filepath >=1.4
                      , scalpel-core >=0.5
+
+executable hsbooru
+  default-language:    Haskell2010
+  ghc-options:         -O2 -threaded -rtsopts -dynamic
+  main-is:             Main.hs
+  default-extensions:  RecordWildCards
+
+  build-depends:       base
+                     , hsbooru
+                     , acid-state >=0.14
                      , optparse-applicative >=0.13
 
+test-suite hsbooru-tests
+  type:                exitcode-stdio-1.0
   default-language:    Haskell2010
+  main-is:             Tests.hs
+
+  build-depends:       base >=4.8
+                     , test-framework >=0.8
+                     , test-framework-quickcheck2 >=0.3
+                     , test-framework-th-prime
+                     , doctest >=0.11
+                     , QuickCheck >=2.9
+                     , acid-state >=0.14
+                     , intset >=0.1
+                     , containers >=0.4
+                     , hsbooru

@@ -24,6 +24,7 @@ module HsBooru.Types (
     , postSuccess
     , postFailed
     , subdivide
+    , failedMap
 
     -- * AcidState helpers/queries
     , ActiveSites(..)
@@ -92,9 +93,9 @@ data SiteState_v0 = SiteState_v0
 -- the site's scraped / downloaded post range. Invariant: presentMap is a
 -- subset of scrapedMap
 data SiteState = SiteState
-    { scrapedMap :: !PostSet
-    , presentMap :: !PostSet
-    }
+    { scrapedMap :: !PostSet -- ^ Posts that were successfully scraped
+    , presentMap :: !PostSet -- ^ Posts that were successfully downloaded
+    } deriving (Show, Eq)
 
 instance Migrate SiteState where
     type MigrateFrom SiteState = SiteState_v0
@@ -117,6 +118,10 @@ instance Default SiteState where
 postSuccess, postFailed :: Int -> SiteState
 postSuccess id = (postFailed id) { presentMap = IS.singleton id }
 postFailed  id = def { scrapedMap = IS.singleton id }
+
+-- | Posts that were scraped but marked as missing, failed or deleted
+failedMap :: SiteState -> PostSet
+failedMap SiteState{..} = scrapedMap `IS.difference` presentMap
 
 -- | Helper function to implement divide-and-conquer algorithms. Given a range
 -- of input values, subdivides the post set onto these input values in a manner

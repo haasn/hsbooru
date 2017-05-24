@@ -2,6 +2,10 @@
 
 extern "C" {
 
+// Constants
+int db_create_or_open()   { return Xapian::DB_CREATE_OR_OPEN;   }
+int db_backend_inmemory() { return Xapian::DB_BACKEND_INMEMORY; }
+
 // Document-related functions
 Xapian::Document *doc_new()
 {
@@ -30,11 +34,12 @@ void doc_add_term(Xapian::Document *doc, const char *tag, size_t len)
 }
 
 // Database-related functions
-Xapian::WritableDatabase * db_open(const char *path, const char **error)
+Xapian::WritableDatabase * db_open(const char *path, int flags,
+                                   const char **error)
 {
     Xapian::WritableDatabase *db = NULL;
     try {
-        db = new Xapian::WritableDatabase(std::string(path));
+        db = new Xapian::WritableDatabase(std::string(path), flags);
         return db;
     } catch (const Xapian::Error &e) {
         *error = e.get_msg().c_str();

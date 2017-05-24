@@ -18,6 +18,7 @@ import Control.Concurrent.Async
 import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.IO.Class
+import Control.Monad.Trans.Class
 
 import Data.Time (getZonedTime)
 import System.IO
@@ -26,12 +27,24 @@ import System.IO.Unsafe (unsafePerformIO)
 import HsBooru.Types
 
 -- | Requires the value to be Just, or throws the given String on failure
-requireJust :: String -> IO (Maybe a) -> ExceptT String IO a
-requireJust err = maybe (throwE err) pure <=< io
+--
+-- >>> requireJust "err" $ Identity (Just 3)
+-- ExceptT (Identity (Right 3))
+--
+-- >>> requireJust "err" $ Identity Nothing
+-- ExceptT (Identity (Left "err"))
+requireJust :: Monad m => String -> m (Maybe a) -> ExceptT String m a
+requireJust err = maybe (throwE err) pure <=< lift
 
 -- | Requires the value to be Right, or throws the Left result on failure
-requireRight :: Show e => IO (Either e a) -> ExceptT String IO a
-requireRight = either (throwE . show) pure <=< io
+--
+-- >>> requireRight $ Identity (Right 4)
+-- ExceptT (Identity (Right 4))
+--
+-- >>> requireRight $ Identity (Left False)
+-- ExceptT (Identity (Left "False"))
+requireRight :: (Monad m, Show e) => m (Either e a) -> ExceptT String m a
+requireRight = either (throwE . show) pure <=< lift
 
 log, logError :: String -> String -> IO ()
 log      name msg = hPutStrLn' stdout $ "["++name++"] " ++ msg

@@ -1,5 +1,9 @@
 {-# LANGUAGE CPP, BangPatterns #-}
-module HsBooru.Stats (printStats) where
+module HsBooru.Stats
+    ( printStats
+    , avgDepth
+    , maxDepth
+    ) where
 
 #include "MachDeps.h"
 
@@ -12,9 +16,8 @@ import HsBooru.Types
 
 -- | Print out a summary of site-related statistics
 printStats :: SiteState -> IO ()
-printStats site@SiteState{..} = do
-    let [total, okay, fail] = map IS.size [scrapedMap, presentMap, failedMap]
-        failedMap = scrapedMap `IS.difference` presentMap
+printStats s@SiteState{..} = do
+    let [total, okay, fail] = map IS.size [scrapedMap, presentMap, failedMap s]
 
     printf "Scraped count: %d\n" total
     printf "Success count: %d\n" okay

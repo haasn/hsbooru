@@ -43,6 +43,14 @@ runXM = ioCatch . withLock . runXapianM
 lock :: MVar ()
 lock = unsafePerformIO $ newMVar ()
 
+-- Constants
+
+foreign import ccall unsafe "db_create_or_open"
+    db_create_or_open :: CInt
+
+foreign import ccall unsafe "db_backend_inmemory"
+    db_backend_inmemory :: CInt
+
 -- Documents and related functions
 
 data CXapianDoc
@@ -88,21 +96,28 @@ addTerm doc tag = io . evalContT $ do
 
 data CXapianDB
 type XapianDB = ForeignPtr CXapianDB
+type Flags = CInt
 
 foreign import ccall unsafe "db_open"
-    cx_db_open :: CString -> Ptr CString -> IO (Ptr CXapianDB)
+    cx_db_open :: CString -> Flags -> Ptr CString -> IO (Ptr CXapianDB)
 
 foreign import ccall unsafe "&db_delete"
     cx_db_delete :: FunPtr (Ptr CXapianDB -> IO ())
 
-xapianDB :: FilePath -> ExceptT String IO XapianDB
-xapianDB path = ExceptT . evalContT $ do
+openDB :: Flags -> FilePath -> ExceptT String IO XapianDB
+openDB flags path = ExceptT . evalContT $ do
     cst <- ContT $ withCString path
     err <- ContT alloca
-    res <- io $ cx_db_open cst err
+    res <- io $ cx_db_open cst flags err
     io $ if res == nullPtr
                 then Left  <$> (peekCString =<< peek err)
                 else Right <$> newForeignPtr cx_db_delete res
+
+xapianDB :: FilePath -> ExceptT String IO XapianDB
+xapianDB = openDB db_create_or_open
+
+memoryDB :: ExceptT String IO XapianDB
+memoryDB = openDB db_backend_inmemory ""
 
 foreign import ccall unsafe "db_add_doc"
     cx_db_add_doc :: Ptr CXapianDB -> Ptr CXapianDoc -> IO ()
