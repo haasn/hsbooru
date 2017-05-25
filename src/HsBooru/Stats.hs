@@ -17,11 +17,11 @@ import HsBooru.Types
 -- | Print out a summary of site-related statistics
 printStats :: SiteState -> IO ()
 printStats s@SiteState{..} = do
-    let [total, okay, fail] = map IS.size [scrapedMap, presentMap, failedMap s]
+    let [total, okay, fail] = map IS.size [scrapedMap, presentMap, deletedMap s]
 
     printf "Scraped count: %d\n" total
     printf "Success count: %d\n" okay
-    printf "Failed count:  %d\n" fail
+    printf "Deleted count: %d\n" fail
     printf "=> Success ratio: %.2f%%\n" $ 100 * okay // total
     printf "=> Deleted ratio: %.2f%%\n" $ 100 * fail // total
     printf "\n"

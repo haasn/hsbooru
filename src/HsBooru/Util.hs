@@ -8,7 +8,7 @@ module HsBooru.Util
     , io
     , ioCatch
     , retry
-    , forConcurrentlyE
+    , forConcurrentlyB
     ) where
 
 import Prelude hiding (log)
@@ -28,23 +28,23 @@ import HsBooru.Types
 
 -- | Requires the value to be Just, or throws the given String on failure
 --
--- >>> requireJust "err" $ Identity (Just 3)
--- ExceptT (Identity (Right 3))
+-- >>> runBooruM . requireJust "err" $ return (Just 3)
+-- Right 3
 --
--- >>> requireJust "err" $ Identity Nothing
--- ExceptT (Identity (Left "err"))
-requireJust :: Monad m => String -> m (Maybe a) -> ExceptT String m a
-requireJust err = maybe (throwE err) pure <=< lift
+-- >>> runBooru M . requireJust "err" $ return Nothing
+-- Left "err"
+requireJust :: String -> IO (Maybe a) -> BooruM a
+requireJust err = maybe (throwB err) pure <=< io
 
 -- | Requires the value to be Right, or throws the Left result on failure
 --
--- >>> requireRight $ Identity (Right 4)
--- ExceptT (Identity (Right 4))
+-- >>> runBooruM . requireRight $ Identity (Right 4)
+-- Right 4
 --
--- >>> requireRight $ Identity (Left False)
--- ExceptT (Identity (Left "False"))
-requireRight :: (Monad m, Show e) => m (Either e a) -> ExceptT String m a
-requireRight = either (throwE . show) pure <=< lift
+-- >>> runBooruM . requireRight $ Identity (Left False)
+-- Left "False"
+requireRight :: Show e => IO (Either e a) -> BooruM a
+requireRight = either (throwB . show) pure <=< io
 
 log, logError :: String -> String -> IO ()
 log      name msg = hPutStrLn' stdout $ "["++name++"] " ++ msg
@@ -65,9 +65,9 @@ ioLock = unsafePerformIO $ newMVar ()
 io :: MonadIO m => IO a -> m a
 io = liftIO
 
--- | Catches all IOExceptions and turns them into ExceptT Strings
-ioCatch :: IO a -> ExceptT String IO a
-ioCatch act = ExceptT $ try act <&> lmap (show :: IOException -> String)
+-- | Catches all IOExceptions and turns them into pure exceptions
+ioCatch :: IO a -> BooruM a
+ioCatch act = ioEither $ try act <&> lmap (show :: IOException -> String)
 
 lmap :: (a -> b) -> Either a x -> Either b x
 lmap f (Left  x) = Left (f x)
@@ -77,10 +77,10 @@ lmap _ (Right x) = Right x
 retry :: MonadPlus m => Int -> m a -> m a
 retry n = msum . replicate n
 
--- | Like forConcurrently, but works for ExceptT e IO instead of just IO. If
+-- | Like forConcurrently, but works for BooruM instead of IO. If
 -- any thread throws an exception, it will be rethrown once all threads
 -- complete.
-forConcurrentlyE :: Traversable t => t a -> (a -> ExceptT e IO b) -> ExceptT e IO (t b)
-forConcurrentlyE ts f = recombine distribute
-    where distribute = mapConcurrently (runExceptT . f) ts
-          recombine  = ExceptT . fmap sequence
+forConcurrentlyB :: Traversable t => t a -> (a -> BooruM b) -> BooruM (t b)
+forConcurrentlyB ts f = recombine distribute
+    where distribute = mapConcurrently (runBooruM . f) ts
+          recombine  = ioEither . fmap sequence

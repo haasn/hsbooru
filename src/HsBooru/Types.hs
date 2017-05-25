@@ -1,10 +1,11 @@
-{-# LANGUAGE TemplateHaskell, TypeFamilies, FlexibleInstances #-}
+{-# LANGUAGE TemplateHaskell, TypeFamilies, FlexibleInstances,
+             GeneralizedNewtypeDeriving #-}
 -- | Convenience module for types and instances, also re-exports helpful common
 -- imports
 module HsBooru.Types (
     -- * Module re-exports for convenience
-      module Control.Monad
-    , module Control.Monad.Trans.Except
+      module Control.Applicative
+    , module Control.Monad
     , module Data.Default
     , module Data.List
     , module Data.Maybe
@@ -13,29 +14,40 @@ module HsBooru.Types (
     , module Network.HTTP.Client
 
     -- * Main types
+    , BooruM(BooruM)
+    , runBooruM
+    , ioEither
+    , throwB
+    , catchB
+
     , Post(..)
     , Rating(..)
     , SiteScraper(..)
     , SiteState(..)
+    , ScraperState(..)
     , InternalDB
 
     -- * PostSets and utilities
     , PostSet
-    , postSuccess
-    , postFailed
+    , successState
+    , deletedState
+    , postState
     , subdivide
-    , failedMap
+    , deletedMap
 
     -- * AcidState helpers/queries
     , ActiveSites(..)
     , GetSite(..)
-    , UpdateSite(..)
+    , UpdateSites(..)
     , RetrySite(..)
     , withAcid
     ) where
 
+import Control.Applicative
 import Control.Exception (bracket)
 import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import Control.Monad.Reader (asks)
 import Control.Monad.State (modify)
@@ -55,18 +67,42 @@ import qualified Data.Map as M
 
 import HsBooru.Conf
 
--- | A scraped post, including all metadata
-data Post = Post
-    { siteID   :: !Int
-    , booru    :: !String
-    , rating   :: !Rating
-    , uploader :: !Int
-    , score    :: !Int
-    , source   :: !(Maybe Text)
-    , fileURL  :: !Text
-    , fileName :: !Text
-    , tags     :: ![Text]
-    } deriving Show
+-- | Internal monad for early termination and configuration
+newtype BooruM a = BooruM { runBooruM_ :: ExceptT String IO a }
+    deriving (Functor, Applicative, Monad, MonadIO, Alternative, MonadPlus)
+
+ioEither :: IO (Either String a) -> BooruM a
+ioEither = BooruM . ExceptT
+
+runBooruM :: BooruM a -> IO (Either String a)
+runBooruM = runExceptT . runBooruM_
+
+throwB :: String -> BooruM a
+throwB = BooruM . throwE
+
+catchB :: BooruM a -> (String -> BooruM a) -> BooruM a
+catchB a h = BooruM $ runBooruM_ a `catchE` (runBooruM_ . h)
+
+-- | A scraped post, including all metadata and status
+data Post
+    -- | Post was successfully scraped
+    = PostSuccess { siteID   :: !Int
+                  , postSite :: !String
+                  , rating   :: !Rating
+                  , uploader :: !Int
+                  , score    :: !Int
+                  , source   :: !(Maybe Text)
+                  , fileURL  :: !Text
+                  , fileName :: !Text
+                  , tags     :: ![Text] }
+    -- | Post scrape was attempted and failed for some reason, included
+    | PostFailure { siteID   :: !Int
+                  , postSite :: !String
+                  , reason   :: !String }
+    -- | Post scrape was successful but the file was confirmed to be deleted
+    | PostDeleted { siteID   :: !Int
+                  , postSite :: !String }
+    deriving Show
 
 data Rating = Safe | Questionable | Explicit
     deriving (Show, Read)
@@ -74,8 +110,8 @@ data Rating = Safe | Questionable | Explicit
 -- | A site-specific scraper definition
 data SiteScraper = SiteScraper
     { siteName :: String
-    , idRange  :: Manager -> ExceptT String IO PostSet
-    , scrapeID :: Manager -> Int -> ExceptT String IO (Maybe Post)
+    , idRange  :: Manager -> BooruM PostSet
+    , scrapeID :: Manager -> Int -> BooruM Post
     }
 
 -- Scraper internal state and database
@@ -112,16 +148,15 @@ instance Monoid SiteState where
 instance Default SiteState where
     def = SiteState IS.empty IS.empty
 
--- | The basic constructors for the site state, representing the state of a
--- single file (either successfully downloaded or marked as
--- failed/missing/deleted).
-postSuccess, postFailed :: Int -> SiteState
-postSuccess id = (postFailed id) { presentMap = IS.singleton id }
-postFailed  id = def { scrapedMap = IS.singleton id }
+-- | Posts that were scraped but marked as missing/deleted
+deletedMap :: SiteState -> PostSet
+deletedMap SiteState{..} = scrapedMap `IS.difference` presentMap
 
--- | Posts that were scraped but marked as missing, failed or deleted
-failedMap :: SiteState -> PostSet
-failedMap SiteState{..} = scrapedMap `IS.difference` presentMap
+-- | The basic constructors for the site state, representing the state of a
+-- single file (either successfully downloaded or marked as deleted)
+successState, deletedState :: Int -> SiteState
+successState id = (deletedState id) { presentMap = IS.singleton id }
+deletedState id = def { scrapedMap = IS.singleton id }
 
 -- | Helper function to implement divide-and-conquer algorithms. Given a range
 -- of input values, subdivides the post set onto these input values in a manner
@@ -145,32 +180,54 @@ splitIS ps = (fix left, right)
               | otherwise = id
 
 -- Can't be a newtype due to overly strict nominal role constraints on SafeCopy
-type ScraperState = M.Map String SiteState
+newtype ScraperState = ScraperState { scraperState :: M.Map String SiteState }
+    deriving Show
+
+instance Monoid ScraperState where
+    mempty = ScraperState mempty
+    mappend (ScraperState a) (ScraperState b) = ScraperState $ M.unionWith mappend a b
+
+instance Default ScraperState where
+    def = ScraperState def
+
+instance Migrate ScraperState where
+    type MigrateFrom ScraperState = M.Map String SiteState
+    migrate = ScraperState
+
+postState :: Post -> ScraperState
+postState PostFailure{..} = def
+postState PostDeleted{..} = ScraperState $ M.singleton postSite (deletedState siteID)
+postState PostSuccess{..} = ScraperState $ M.singleton postSite (successState siteID)
 
 -- acid-state integration
 
 deriveSafeCopy 0 'base ''IS.IntSet
 deriveSafeCopy 0 'base ''SiteState_v0
 deriveSafeCopy 1 'extension ''SiteState
+deriveSafeCopy 1 'extension ''ScraperState
 
 activeSites :: A.Query ScraperState [String]
-activeSites = asks M.keys
+activeSites = asks $ M.keys . scraperState
 
 getSite :: String -> A.Query ScraperState SiteState
-getSite k = asks $ fromMaybe def . M.lookup k
+getSite k = asks $ fromMaybe def . M.lookup k . scraperState
 
 updateSite :: String -> SiteState -> A.Update ScraperState ()
-updateSite k = modify . M.insertWith mappend k
+updateSite site = modify . mappend . ScraperState . M.singleton site
+{-# DEPRECATED updateSite "Only kept for acid compatibility" #-}
+
+updateSites :: ScraperState -> A.Update ScraperState ()
+updateSites ss = modify $ mappend ss
 
 retrySite :: String -> A.Update ScraperState ()
-retrySite = modify . M.adjust reset
+retrySite site = modify $ ScraperState . M.adjust reset site . scraperState
     where reset ss = ss { scrapedMap = presentMap ss }
 
-A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite, 'retrySite]
+A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite, 'updateSites, 'retrySite]
 
 -- Utility
 
 type InternalDB = A.AcidState ScraperState
 
 withAcid :: (InternalDB -> IO a) -> IO a
-withAcid = bracket (A.openLocalStateFrom acidDir M.empty) A.closeAcidState
+withAcid = bracket (A.openLocalStateFrom acidDir def) A.closeAcidState

@@ -9,6 +9,7 @@ import Test.QuickCheck
 import qualified Data.Acid.Memory.Pure as A
 import qualified Data.IntervalSet as IS
 import qualified Data.Set as S
+import qualified Data.Map as M
 
 import HsBooru.Types
 import HsBooru.Stats
@@ -26,13 +27,13 @@ instance Arbitrary IS.IntSet where
     arbitrary = IS.fromList <$> arbitrary
     shrink = map IS.fromList . shrink . IS.toList
 
-prop_ss_disjoint ss = IS.null $ presentMap ss `IS.intersection` failedMap ss
-prop_ss_union    ss = scrapedMap ss == presentMap ss `IS.union` failedMap ss
+prop_ss_disjoint ss = IS.null $ presentMap ss `IS.intersection` deletedMap ss
+prop_ss_union    ss = scrapedMap ss == presentMap ss `IS.union` deletedMap ss
 
 prop_ss_superset_pm ss = scrapedMap ss `IS.isSupersetOf` presentMap ss
-prop_ss_superset_fm ss = scrapedMap ss `IS.isSupersetOf` failedMap ss
+prop_ss_superset_fm ss = scrapedMap ss `IS.isSupersetOf` deletedMap ss
 
-prop_success_overrides i = postSuccess i <> postFailed i == postSuccess i
+prop_success_overrides i = successState i <> deletedState i == successState i
 
 prop_subdivide_all p l = map snd (subdivide p l) `sameList` (l :: [Int])
 
@@ -55,19 +56,24 @@ instance Arbitrary SiteState where
         [ SiteState sm p | p <- shrink pm ]
      ++ [ SiteState s $ IS.intersection s pm | s <- shrink sm ]
 
--- mock AcidDB
-acidDB = A.openAcidState def
+instance Arbitrary ScraperState where
+    arbitrary = ScraperState <$> arbitrary
+    shrink (ScraperState m) = ScraperState <$> shrink m
+
+-- mock database
+acidDB = A.openAcidState
 query  = flip A.query
 update = flip A.update_
 
-prop_all_sites sites = sites == S.fromList sites'
-    where sites' = query ActiveSites $ foldr update acidDB events
-          events = [ UpdateSite s def | s <- S.toList sites ]
+touchSite s = UpdateSites . postState $ PostDeleted { siteID = 1, postSite = s }
 
-prop_retry ss = IS.null $ failedMap ss'
-    where ss' = query (GetSite "test")
-              . update (RetrySite "test")
-              $ update (UpdateSite "test" ss) acidDB
+prop_all_sites sites = sites == S.fromList sites'
+    where sites' = query ActiveSites $ foldr update (acidDB def) events
+          events = map touchSite $ S.toList sites
+
+prop_retry ss = all IS.null [ deletedMap $ query (GetSite s) st | s <- sites ]
+    where sites = M.keys $ scraperState ss
+          st = foldr (update . RetrySite) (acidDB ss) sites
 
 -- * HsBooru.Stats
 

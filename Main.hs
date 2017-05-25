@@ -31,9 +31,9 @@ siteNameOpt = siteName <$> siteOpt
 -- `scrape` command
 scrape :: [SiteScraper] -> InternalDB -> IO ()
 scrape sites st = do
-    db <- either error id <$> runExceptT (xapianDB xapianDir)
+    Right db <- xapianDB xapianDir
     forM_ sites $ \site@SiteScraper{..} -> do
-        res <- runExceptT . retry retryCount $ scrapeSite site db st
+        res <- runBooruM $ processSite site (db, st)
         case res of
             Left e  -> logError siteName e
             Right _ -> return ()

@@ -17,16 +17,13 @@ acidDir     = dbDir </> "acid"
 mgrOpts     = tlsManagerSettings { managerConnCount = max 10 threadCount
                                  , managerRetryableException = const True }
 
--- How often to retry each request before giving up. Also how often to retry
--- each site, in case an iteration encountered some sort of failure. In
--- general, how often to retry actions that could fail before giving up on
--- them.
+-- How often to retry each request before giving up.
 retryCount  = 3
 
 -- How many posts to fetch before committing them all to the database.
 -- Increasing this can improve throughput and reduce database overhead at the
 -- cost of losing more work when you interrupt the program prematuraly.
-batchSize   = 200
+batchSize   = 1000
 
 -- How many scraper threads to run in parallel. Increasing this improves
 -- performance, but if you take it too far you will probably get rate limited

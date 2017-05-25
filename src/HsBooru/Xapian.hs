@@ -1,10 +1,12 @@
 -- | Xapian database integration
 module HsBooru.Xapian
-    ( XapianDB
+    ( XapianM
+    , XapianDB
     , xapianDB
     , runXM
     , xapianStore
-    , commit
+    , txBegin
+    , txCommit
     ) where
 
 import Control.Concurrent.MVar
@@ -37,7 +39,9 @@ encVal doc val = addValDouble doc val . fromIntegral
 
 -- | Encode a post and store it in the xapian database
 xapianStore :: XapianDB -> Post -> XapianM ()
-xapianStore db Post{..} = do
+xapianStore _  PostDeleted{..} = return ()
+xapianStore _  PostFailure{..} = return ()
+xapianStore db PostSuccess{..} = do
     doc <- newDoc
     encVal doc siteIDSlot siteID
     encVal doc scoreSlot score
@@ -45,7 +49,7 @@ xapianStore db Post{..} = do
     strVal doc fileURLSlot  fileURL
     forM_ source $ strVal doc sourceSlot
 
-    addTag doc booruPrefix    $ T.pack booru
+    addTag doc booruPrefix    $ T.pack postSite
     addTag doc siteIDPrefix   $ T.pack (show siteID)
     addTag doc uploaderPrefix $ T.pack (show uploader)
     addTag doc ratingPrefix   $ T.pack (show rating)
@@ -53,7 +57,7 @@ xapianStore db Post{..} = do
     addTag doc extPrefix      $ getExt fileName
     forM_ tags $ addTag doc tagPrefix
 
-    addDocument db doc
+    void $ addDocument db doc
 
 getExt :: Text -> Text
 getExt = T.pack . drop 1 . takeExtension . T.unpack

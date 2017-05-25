@@ -21,6 +21,7 @@ import qualified Data.IntervalSet as IS
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as LT
 
+import HsBooru.Conf
 import HsBooru.Scraper
 import HsBooru.Types
 import HsBooru.Util
@@ -43,11 +44,11 @@ first :: Selector -> Scraper LT.Text a -> Scraper LT.Text (Maybe a)
 first s = fmap listToMaybe . chroots s
 
 -- | Helper function to run a scraper on a URL
-scrape :: Manager -> URL -> Scraper LT.Text a -> ExceptT String IO a
+scrape :: Manager -> URL -> Scraper LT.Text a -> BooruM a
 scrape mgr url s = do
-    io.log "http" $ "Scraping " ++ url
+    io.log "http" $ "Attempting to scrape " ++ url
     body <- decodeUtf8 <$> fetch mgr url
-    maybe (throwE "Scraper returned no results") return $
+    maybe (throwB "Scraper returned no results") return $
         scrapeStringLike body s
 
 -- | List of supported website scrapers
@@ -62,7 +63,8 @@ findSite s = find (\ss -> siteName ss == s) scrapers
 gelbooru :: SiteScraper
 gelbooru = SiteScraper{..}
     where siteName = "gelbooru"
-          apiURL = "https://gelbooru.com/index.php?page=dapi&s=post&q=index"
+          postSite = siteName
+          apiURL   = "https://gelbooru.com/index.php?page=dapi&s=post&q=index"
 
           idRange mgr = do
                 -- To get the highest ID, we fetch a single post and read out
@@ -71,14 +73,19 @@ gelbooru = SiteScraper{..}
                 c <- scrape mgr indexURL $ attrRead "id" "post"
                 return $ IS.interval 1 c
 
-          scrapeID mgr id = do
-                let postURL = apiURL ++ "&id=" ++ show id
-                scrape mgr postURL $ first "post" scrapePost
+          scrapeID mgr siteID = do
+                let postURL = apiURL ++ "&id=" ++ show siteID
+                    count   = attrRead "count" "posts"
+                    post    = first "post" scrapePost
+
+                res <- scrape mgr postURL $ liftM2 (,) count post
+                return $ case res of
+                    (1, Just p)  -> p
+                    (0, Nothing) -> PostDeleted{..}
+                    (_, _)       -> PostFailure{reason = "Unknown failure", ..}
 
           scrapePost = do
-                let post  = "post"
-                    booru = siteName
-
+                let post = "post"
                 siteID   <- attrRead "id" post
                 uploader <- attrRead "creator_id" post
                 score    <- attrRead "score" post
@@ -98,4 +105,4 @@ gelbooru = SiteScraper{..}
                 -- works..
                 let fileName = T.pack $ takeFileName (T.unpack fileURL)
 
-                return Post{..}
+                return PostSuccess{..}

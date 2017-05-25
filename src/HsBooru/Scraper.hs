@@ -4,6 +4,9 @@ module HsBooru.Scraper
     , fetch
     , download
     , scrapeSite
+    , downloadImages
+    , storeImages
+    , processSite
     ) where
 
 import Prelude hiding (log)
@@ -13,77 +16,96 @@ import qualified Data.Acid as A
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.IntervalSet as IS
 import qualified Data.Text as T
+import qualified Pipes.Prelude as P
 
 import Network.HTTP.Types.Status
 import System.Directory (doesFileExist)
 import System.FilePath.Posix ((</>))
+import Pipes
 
 import HsBooru.Conf
 import HsBooru.Types
 import HsBooru.Util
 import HsBooru.Xapian
 
+-- * Fetching and scraping
+
 type URL = String
 
--- | Fetch a URL and return its contents as a ByteString
-fetch :: Manager -> URL -> ExceptT String IO LBS.ByteString
-fetch mgr url = do
-    req <- parseRequest url
+-- | Fetch a URL and return its contents as a ByteString. Retries a number
+-- of times according to retryCount
+fetch :: Manager -> URL -> BooruM LBS.ByteString
+fetch mgr url = retry retryCount $ do
+    req <- io $ parseRequest url
     res <- requireRight . tryHttp $ httpLbs req mgr
     let status = responseStatus res
     unless (statusIsSuccessful status) $
-        throwE $ "Error downloading " ++ url ++ ": " ++ show status
+        throwB $ "Error downloading " ++ url ++ ": " ++ show status
     return $ responseBody res
   where tryHttp :: IO a -> IO (Either HttpException a)
         tryHttp = try
 
+-- | Run a scraper on a website and range, returning a stream of Posts.
+scrapeSite :: SiteScraper -> Manager -> PostSet -> Producer Post BooruM ()
+scrapeSite SiteScraper{..} mgr = go where
+    go posts | IS.null posts = return ()
+    go posts = do
+        let id = IS.findMin posts
+        lift (tryScrape id) >>= yield
+        go $ IS.delete id posts
+
+    tryScrape siteID = scrapeID mgr siteID `catchB`
+        \reason -> return PostFailure{postSite = siteName, ..}
+
+-- * Downloading and storing
+
 -- | Fetch a URL and save it to a file
-download :: Manager -> URL -> FilePath -> ExceptT String IO ()
+download :: Manager -> URL -> FilePath -> BooruM ()
 download mgr url path = fetch mgr url >>= ioCatch . LBS.writeFile path
 
--- | Checks if an image is already downloaded, and downloads it if it isn't
-requireImage :: Manager -> Post -> ExceptT String IO ()
-requireImage mgr Post{..} = do
-    let filePath = imageDir </> T.unpack fileName
+-- | Checks if an image is already downloaded, and downloads it if it isn't.
+requireImage :: Manager -> FilePath -> URL -> BooruM ()
+requireImage mgr fileName fileURL = do
+    let filePath = imageDir </> fileName
     e <- ioCatch $ doesFileExist filePath
-    unless e $ download mgr (T.unpack fileURL) filePath
+    unless e $ download mgr fileURL filePath
 
--- | Fetch a single post ID and download the corresponding image. Returns
--- Nothing if we got a reply but the post doesn't seem to exist
-fetchID :: SiteScraper -> Manager -> Int -> ExceptT String IO (Maybe Post)
-fetchID SiteScraper{..} mgr id = do
-    post <- scrapeID mgr id
-    forM_ post $ requireImage mgr
-    case post of
-        Just p  -> io.log siteName $ showPost p
-        Nothing -> io.logError siteName $ "Post " ++ show id ++ " deleted!"
-    return post
-  where showPost Post{..} = unwords [ show siteID
-                                    , T.unpack fileURL
-                                    , T.unpack $ T.unwords tags ]
+-- | Attempt to download an image, transforming PostSuccess into PostFailure on
+-- failure
+downloadImage :: Manager -> Post -> BooruM Post
+downloadImage _   p@PostDeleted{}   = return p
+downloadImage _   p@PostFailure{}   = return p
+downloadImage mgr p@PostSuccess{..} = tryDL `catchB` \reason -> return PostFailure{..}
+    where tryDL = p <$ requireImage mgr (T.unpack fileName) (T.unpack fileURL)
 
--- | Core scraping loop that runs per-thread
-runScraper :: SiteScraper -> Manager -> XapianDB -> InternalDB
-           -> PostSet -> ExceptT String IO ()
-runScraper _ _ _ _ posts | IS.null posts = return ()
-runScraper site@SiteScraper{..} mgr db st posts = do
-    let scrapeIDs = take batchSize $ IS.toList posts
-    io.log siteName $ "Scraping posts " ++ show scrapeIDs
-    res <- forM scrapeIDs $ retry retryCount . fetchID site mgr
+-- | Download all images, transforming PostSuccess into PostFailure where the
+-- download failed
+downloadImages :: Manager -> Pipe Post Post BooruM r
+downloadImages = P.mapM . downloadImage
 
-    let process (id, Nothing)   = return $ postFailed id
-        process (id, Just post) = postSuccess id <$ xapianStore db post
 
-        results = traverse process $ zip scrapeIDs res
+-- * Database interaction and finalization
 
-    io.log siteName $ "Finished scraping batch, commiting to DB"
-    newPosts <- runXM $ mconcat <$> results <* commit db
-    ioCatch . A.update st $ UpdateSite siteName newPosts
-    runScraper site mgr db st $ posts `IS.difference` scrapedMap newPosts
+-- | Store a batch of images in the database, throwing on any failure.
+-- The batch will be committed atomically, i.e. all-or-nothing.
+storeBatch :: (XapianDB, InternalDB) -> [Post] -> BooruM ()
+storeBatch (db, st) ps = do
+    -- Store all of the posts in the xapian DB as a transaction
+    runXM $ do txBegin db
+               mapM_ (xapianStore db) ps
+               txCommit db
+    -- Assuming this succeeded, record all of the IDs into the acid state
+    io . A.update st . UpdateSites $ foldMap postState ps
 
--- | Fetch all necessary metadata and spawn a bunch of scraper threads
-scrapeSite :: SiteScraper -> XapianDB -> InternalDB -> ExceptT String IO ()
-scrapeSite site@SiteScraper{..} db st = do
+-- | A consumer that stores all received images one by one.
+-- Note: Very inefficient
+storeImages :: (XapianDB, InternalDB) -> Consumer Post BooruM ()
+storeImages dbs = P.mapM_ $ \p -> storeBatch dbs [p]
+
+
+-- * Overall processing logic
+processSite :: SiteScraper -> (XapianDB, InternalDB) -> BooruM ()
+processSite s@SiteScraper{..} (db, st) = do
     mgr <- io $ newManager mgrOpts
     siteState <- io $ A.query st (GetSite siteName)
     siteRange <- idRange mgr
@@ -96,10 +118,5 @@ scrapeSite site@SiteScraper{..} db st = do
                    ++      "/" ++ show (IS.size siteRange)
                    ++ " New: " ++ show (IS.size new)
 
-    forConcurrentlyE threads $ \(ps, tid) ->
-        unless (IS.null ps) $ do
-            let range = (IS.findMin ps, IS.findMax ps)
-            io.log (siteName ++ "/" ++ show tid) $ show range
-            runScraper site mgr db st ps
-
-    ioCatch $ A.createCheckpoint st
+    runEffect $ scrapeSite s mgr new >-> downloadImages mgr >-> storeImages (db, st)
+    ioCatch   $ A.createCheckpoint st

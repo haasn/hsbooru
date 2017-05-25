@@ -12,8 +12,11 @@ module HsBooru.Xapian.FFI
     -- * Database
     , XapianDB
     , xapianDB
+    , memoryDB
+    , DocId
     , addDocument
-    , commit
+    , txBegin
+    , txCommit
     ) where
 
 import Control.Exception
@@ -22,22 +25,22 @@ import Control.Monad.Trans.Except
 import Control.Monad.Trans.Cont
 import Control.Monad.IO.Class
 
-import Data.Text (Text)
 import qualified Data.Text.Foreign as T (withCStringLen)
 
 import Foreign
 import Foreign.C
 import System.IO.Unsafe (unsafePerformIO)
 
+import HsBooru.Types
 import HsBooru.Util
 
 -- | Xapian calls are hidden behind a newtype because access to xapian
 -- is not thread safe. This allows the library to ensure correct locking.
-newtype XapianM a = XapianM { runXapianM :: IO a }
+newtype XapianM a = XapianM { runXapianM :: ExceptT String IO a }
     deriving (Functor, Applicative, Monad, MonadIO)
 
-runXM :: XapianM a -> ExceptT String IO a
-runXM = ioCatch . withLock . runXapianM
+runXM :: XapianM a -> BooruM a
+runXM (XapianM a) = ioEither $ withLock (runExceptT a)
     where withLock = bracket (takeMVar lock) (putMVar lock) . const
 
 lock :: MVar ()
@@ -98,38 +101,55 @@ data CXapianDB
 type XapianDB = ForeignPtr CXapianDB
 type Flags = CInt
 
+wrapError :: Eq a => a -> (Ptr CString -> IO a) -> (a -> IO b)
+          -> ContT r IO (Either String b)
+wrapError badVal action good = do
+    err <- ContT alloca
+    res <- io $ action err
+    io $ if res == badVal
+        then Left  <$> (peekCString =<< peek err)
+        else Right <$> good res
+
 foreign import ccall unsafe "db_open"
     cx_db_open :: CString -> Flags -> Ptr CString -> IO (Ptr CXapianDB)
 
 foreign import ccall unsafe "&db_delete"
     cx_db_delete :: FunPtr (Ptr CXapianDB -> IO ())
 
-openDB :: Flags -> FilePath -> ExceptT String IO XapianDB
-openDB flags path = ExceptT . evalContT $ do
+openDB :: Flags -> FilePath -> IO (Either String XapianDB)
+openDB flags path = evalContT $ do
     cst <- ContT $ withCString path
-    err <- ContT alloca
-    res <- io $ cx_db_open cst flags err
-    io $ if res == nullPtr
-                then Left  <$> (peekCString =<< peek err)
-                else Right <$> newForeignPtr cx_db_delete res
+    wrapError nullPtr (cx_db_open cst flags) (newForeignPtr cx_db_delete)
 
-xapianDB :: FilePath -> ExceptT String IO XapianDB
+xapianDB :: FilePath -> IO (Either String XapianDB)
 xapianDB = openDB db_create_or_open
 
-memoryDB :: ExceptT String IO XapianDB
+memoryDB :: IO (Either String XapianDB)
 memoryDB = openDB db_backend_inmemory ""
 
 foreign import ccall unsafe "db_add_doc"
-    cx_db_add_doc :: Ptr CXapianDB -> Ptr CXapianDoc -> IO ()
+    cx_db_add_doc :: Ptr CXapianDB -> Ptr CXapianDoc -> Ptr CString -> IO CUInt
 
-addDocument :: XapianDB -> Document -> XapianM ()
-addDocument db doc = io . evalContT $ do
+type DocId = CUInt
+
+addDocument :: XapianDB -> Document -> XapianM DocId
+addDocument db doc = XapianM . ExceptT . evalContT $ do
     pdb  <- ContT $ withForeignPtr db
     pdoc <- ContT $ withForeignPtr doc
-    io $ cx_db_add_doc pdb pdoc
+    wrapError 0 (cx_db_add_doc pdb pdoc) return
 
-foreign import ccall unsafe "db_commit"
-    cx_db_commit :: Ptr CXapianDB -> IO ()
+foreign import ccall unsafe "db_tx_begin"
+    cx_db_tx_begin :: Ptr CXapianDB -> Ptr CString -> IO CUInt
 
-commit :: XapianDB -> XapianM ()
-commit db = io $ withForeignPtr db cx_db_commit
+foreign import ccall unsafe "db_tx_commit"
+    cx_db_tx_commit :: Ptr CXapianDB -> Ptr CString -> IO CUInt
+
+txBegin :: XapianDB -> XapianM ()
+txBegin db = XapianM . ExceptT . evalContT $ do
+    pdb <- ContT $ withForeignPtr db
+    wrapError 0 (cx_db_tx_begin pdb) (\_ -> pure ())
+
+txCommit :: XapianDB -> XapianM ()
+txCommit db = XapianM . ExceptT . evalContT $ do
+    pdb <- ContT $ withForeignPtr db
+    wrapError 0 (cx_db_tx_commit pdb) (\_ -> pure ())
