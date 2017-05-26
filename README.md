@@ -64,14 +64,15 @@ copy/paste it:
 hsbooru - a haskell *booru scraper using xapian
 
 Usage: hsbooru COMMAND (-d|--dbDir DIR) [-i|--imageDir DIR] [-b|--batchsize N] [-p|--parallelism N]
-               [-j|--jobs N] [-r|--retryCount N]
+               [-j|--jobs N] [-r|--retryCount N] [-m|--minTags N] [-v|--verbose]
 
 Available options:
   -d,--dbDir DIR           Database directory
   -i,--imageDir DIR        Directory to store images in. Defaults to `<dbDir>/images`.
   -b,--batchsize N         How many posts to fetch before committing them all to the database. Since
-                           this is a synchronous operation, using a lower value reduces
-                           throughput. (default: 1000)
+                           this is a synchronous operation, using a lower value reduces throughput;
+                           but using a too high value can create long stalls in the
+                           mailbox. (default: 1000)
   -p,--parallelism N       How many in-flight requests to maintain per thread. Increasing this can
                            improve throughput but going too high risks running into network errors
                            as the site kills connections. (default: 2)
@@ -79,6 +80,8 @@ Available options:
                            CPU cores, but no more than 4. Going too high can be slower, if the
                            server decides to rate limit.
   -r,--retryCount N        How often to retry each network request before giving up. (default: 3)
+  -m,--minTags N           Only store posts with this many tags or more. (default: 0)
+  -v,--verbose             Print data about every URL and post. Can be slow!
   -h,--help                Show this help text
 
 Available commands:
