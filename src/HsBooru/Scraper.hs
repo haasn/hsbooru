@@ -132,9 +132,12 @@ processSite s@SiteScraper{..} = do
     (out, inp) <- io.spawn $ bounded batchSize
 
     -- Upstream
-    let postStream = S.chain inspectPost . S.mapM downloadImage . scrapeSite s
-    let runThread  = sendOutput out . postStream
-        threads    = subdivide new $ replicate threadCount runThread
+    let runThread  = sendOutput out
+                   . S.chain inspectPost
+                   . S.mapM downloadImage
+                   . scrapeSite s
+
+    let threads = subdivide new $ replicate threadCount runThread
     forM_ threads $ \(r, f) -> lower (f r) >>= io . forkIO . void
 
     -- Downstream

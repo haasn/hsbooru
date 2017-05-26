@@ -189,11 +189,11 @@ A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite, 'updateSites, 
 data Context = Ctx
     { xapianDB    :: !XapianDB
     , acidDB      :: !InternalDB
+    , imageDir    :: !FilePath
     , manager     :: !Manager
     , retryCount  :: !Int
     , batchSize   :: !Int
     , threadCount :: !Int
-    , imageDir    :: !FilePath
     }
 
 spawnManager :: Int -> IO Manager
