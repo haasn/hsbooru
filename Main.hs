@@ -28,6 +28,7 @@ data GlobalConf = Conf
     , parCount    :: Int
     , optCapCount :: Maybe Int
     , retryCount  :: Int
+    , minTagCount :: Int
     }
 
 type Command = GlobalConf -> IO ()
@@ -174,4 +175,13 @@ parseGlobalOpts = Conf
    <> showDefault
    <> value 3
    <> help ("How often to retry each network request before giving up.")
+    )
+
+  <*> option auto
+    ( long "minTags"
+   <> short 'm'
+   <> metavar "N"
+   <> showDefault
+   <> value 0
+   <> help ("Only store posts with this many tags or more.")
     )

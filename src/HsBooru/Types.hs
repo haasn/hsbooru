@@ -194,6 +194,7 @@ data Context = Ctx
     , retryCount  :: !Int
     , batchSize   :: !Int
     , threadCount :: !Int
+    , minTagCount :: !Int
     }
 
 spawnManager :: Int -> IO Manager

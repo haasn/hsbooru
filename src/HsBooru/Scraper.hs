@@ -54,8 +54,16 @@ scrapeSite SiteScraper{..} = go where
         lift (tryScrape id) >>= S.yield
         go $ IS.delete id posts
 
-    tryScrape siteID = scrapeID siteID `catchB`
+    tryScrape siteID = (scrapeID siteID >>= applyFilter) `catchB`
         \reason -> return PostFailure{postSite = siteName, ..}
+
+applyFilter :: Post -> BooruM Post
+applyFilter p@PostSuccess{..} = do
+    Ctx{..} <- ask
+    when (length tags < minTagCount) $ throwB "Post has too few tags"
+    return p
+
+applyFilter p = return p
 
 -- * Downloading and storing
 
