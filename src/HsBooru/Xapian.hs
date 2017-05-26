@@ -55,7 +55,7 @@ addTag db doc prefix (T.map toLower -> tag) = do
         safeTag     = prefix <> T.intercalate "_" validGroups
         fullTag     = prefix <> tag
 
-    addTerm doc $ prefix <> fullTag
+    addTerm doc $ fullTag
     unless (safeTag == fullTag) $
         addSynonym db safeTag fullTag
 
