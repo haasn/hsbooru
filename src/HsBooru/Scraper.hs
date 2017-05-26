@@ -90,18 +90,36 @@ downloadImage p@PostSuccess{..} = tryDL `catchB` \reason -> return PostFailure{.
 
 -- * Database interaction and finalization
 
+data PostStats = PostStats { good :: !Int, gone :: !Int, fail :: !Int }
+instance Monoid PostStats where
+    mempty = PostStats 0 0 0
+    PostStats a b c `mappend` PostStats x y z = PostStats (a+x) (b+y) (c+z)
+
+postStats :: Post -> PostStats
+postStats PostSuccess{} = PostStats 1 0 0
+postStats PostDeleted{} = PostStats 0 1 0
+postStats PostFailure{} = PostStats 0 0 1
+
+showStats :: PostStats -> String
+showStats PostStats{..} =  "Saved: "   ++ show good
+                       ++ " Deleted: " ++ show gone
+                       ++ " Failed: "  ++ show fail
+
 -- | Store a batch of images in the database, throwing on any failure.
 -- The batch will be committed atomically, i.e. all-or-nothing.
 storeBatch :: Stream (Of Post) BooruM r -> BooruM r
 storeBatch ps = do
     Ctx{..} <- ask
-    let update (!s, a) p = (postState p <> s, xapianStore xapianDB p >> a)
-    (rec, storeAll) :> r <- S.fold update (mempty, return ()) id ps
+    let update (!r, !s, a) p = ( postState p <> r
+                               , postStats p <> s
+                               , xapianStore xapianDB p >> a
+                               )
+    (rec, stats, storeAll) :> r <- S.fold update (mempty, mempty, return ()) id ps
     -- Store them all in the xapian DB first, and only when this succeeds,
     -- the acid db
     runXM $ txBegin xapianDB >> storeAll >> txCommit xapianDB
     io . A.update acidDB $ UpdateSites rec
-    io.log "db" $ "Committed " ++ show (postCount rec) ++ " post(s) to the DB"
+    io.log "db" $ showStats stats
     return r
 
 -- | Stores all received images in batches of size batchSize
