@@ -12,6 +12,7 @@ scoreSlot    = 1
 fileNameSlot = 2
 fileURLSlot  = 3
 sourceSlot   = 4
+uploadedSlot = 5
 
 termPrefixes = [
     ('B', ["booru", "site"]),
@@ -25,8 +26,9 @@ termPrefixes = [
 ]
 
 rangeValues = [
-    (siteIDSlot, ["id", "new", "newest"]),
-    (scoreSlot,  ["score", "best"]),
+    (siteIDSlot,   ["id", "new", "newest"]),
+    (scoreSlot,    ["score", "best"]),
+    (uploadedSlot, ["uploaded", "created_at", "date"]),
 ]
 
 strValues = [

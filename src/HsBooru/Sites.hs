@@ -12,6 +12,7 @@ import Prelude hiding (log)
 import Data.Char (isNumber)
 import Data.Text (Text)
 import Data.Text.Lazy.Encoding (decodeUtf8)
+import Data.Time.Format
 
 import Text.HTML.Scalpel.Core hiding (scrape)
 import Text.Read (readMaybe)
@@ -97,6 +98,8 @@ gelbooru = SiteScraper{..}
                 source   <- attr "source" post <&> \case
                                 ""  -> Nothing
                                 src -> Just (LT.toStrict src)
+                let parseTime = parseTimeM False defaultTimeLocale "%c"
+                uploaded <- parseTime =<< LT.unpack <$> attr "created_at" post
 
 
                 -- Since we're working with direct links, we can extract the

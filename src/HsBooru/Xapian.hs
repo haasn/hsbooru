@@ -14,6 +14,7 @@ import Control.Concurrent.MVar
 import Control.Exception (bracket)
 import Data.Char
 import Data.Foldable
+import Data.Time.Clock.POSIX
 
 import System.IO.Unsafe (unsafePerformIO)
 import System.FilePath.Posix (takeExtension)
@@ -44,6 +45,7 @@ scoreSlot    = 1 -- User score assigned to the website
 fileNameSlot = 2 -- Name the file is stored under
 fileURLSlot  = 3 -- URL the file was downloaded from
 sourceSlot   = 4 -- Website's literal "Source" field, if it has one
+uploadedSlot = 5 -- Upload timestamp
 
 -- * Utilities
 
@@ -62,8 +64,8 @@ addTag db doc prefix (T.map toLower -> tag) = do
 strVal :: Document -> ValueNumber -> Text -> XapianM ()
 strVal doc val = addValStr doc val . T.map toLower
 
-encVal :: Integral a => Document -> ValueNumber -> a -> XapianM ()
-encVal doc val = addValDouble doc val . fromIntegral
+encVal :: Real a => Document -> ValueNumber -> a -> XapianM ()
+encVal doc val = addValDouble doc val . realToFrac
 
 -- | Encode a post and store it in the xapian database
 xapianStore :: XapianDB -> Post -> XapianM ()
@@ -73,6 +75,7 @@ xapianStore db PostSuccess{..} = do
     doc <- newDoc
     encVal doc siteIDSlot siteID
     encVal doc scoreSlot score
+    encVal doc uploadedSlot $ utcTimeToPOSIXSeconds uploaded
     strVal doc fileNameSlot fileName
     strVal doc fileURLSlot  fileURL
     forM_ source $ strVal doc sourceSlot

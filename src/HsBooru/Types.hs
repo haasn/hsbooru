@@ -12,6 +12,7 @@ module HsBooru.Types (
     , module Data.Maybe
     , module Data.Monoid
     , module Data.Text
+    , module Data.Time
     , module Network.HTTP.Client
     , module System.FilePath
 
@@ -65,6 +66,7 @@ import Data.List.Split
 import Data.Maybe
 import Data.Monoid
 import Data.Text (Text)
+import Data.Time (UTCTime)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import System.FilePath
@@ -223,6 +225,7 @@ lower (BooruM et) = runReaderT (runExceptT et) <$> ask
 data Post
     -- | Post was successfully scraped
     = PostSuccess { siteID   :: !Int
+                  , uploaded :: !UTCTime
                   , postSite :: !String
                   , rating   :: !Rating
                   , uploader :: !Int
