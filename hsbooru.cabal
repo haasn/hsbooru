@@ -79,6 +79,7 @@ executable hsbooru
   build-depends:       base
                      , hsbooru
                      , filepath >=1.4
+                     , directory >=1.2
                      , acid-state >=0.14
                      , optparse-applicative >=0.13
 

@@ -9,6 +9,7 @@ import Options.Applicative
 import GHC.Conc (getNumProcessors)
 import Control.Concurrent
 import System.Environment (getArgs)
+import System.Directory (createDirectoryIfMissing)
 import System.FilePath
 
 import qualified Data.Acid as A
@@ -46,6 +47,8 @@ scrape sites Conf{..} = withAcid dbDir $ \acidDB -> do
     -- Generate context
     let xapianDir = dbDir </> "xapian"
         imageDir  = fromMaybe (dbDir </> "images") optImageDir
+
+    createDirectoryIfMissing True imageDir
     xapianDB <- either error id <$> localDB xapianDir
 
     -- Spawn enough threads to make each capability have about ~parCount open
