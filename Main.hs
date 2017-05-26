@@ -42,9 +42,8 @@ siteOpt = argument readSite $ metavar "SITE" <> help "booru name"
 siteNameOpt :: Parser String
 siteNameOpt = siteName <$> siteOpt
 
--- ** `scrape` command
-scrape :: [SiteScraper] -> Command
-scrape sites Conf{..} = withAcid dbDir $ \acidDB -> do
+runScraper :: [SiteScraper] -> GlobalConf -> InternalDB -> IO ()
+runScraper sites Conf{..} acidDB = do
     -- Generate context
     let xapianDir = dbDir </> "xapian"
         imageDir  = fromMaybe (dbDir </> "images") optImageDir
@@ -71,6 +70,11 @@ scrape sites Conf{..} = withAcid dbDir $ \acidDB -> do
     A.createArchive acidDB
     log "general" "Done scraping."
 
+
+-- ** `scrape` command
+scrape :: [SiteScraper] -> Command
+scrape sites c@Conf{..} = withAcid dbDir $ runScraper sites c
+
 scrapeCmd :: Mod CommandFields Command
 scrapeCmd = command "scrape" . info (scrape <$> some siteOpt) $
     progDesc "Scrape posts from websites"
@@ -79,7 +83,7 @@ scrapeCmd = command "scrape" . info (scrape <$> some siteOpt) $
 update :: Command
 update c@Conf{..} = withAcid dbDir $ \acidDB -> do
     sites <- A.query acidDB ActiveSites
-    scrape [ ss | ss <- scrapers, siteName ss `elem` sites ] c
+    runScraper [ ss | ss <- scrapers, siteName ss `elem` sites ] c acidDB
 
 updateCmd :: Mod CommandFields Command
 updateCmd = command "update" . info (pure update) $
