@@ -32,6 +32,7 @@ module HsBooru.Types (
     , successState
     , deletedState
     , postState
+    , postCount
     , subdivide
     , deletedMap
 
@@ -198,6 +199,10 @@ postState :: Post -> ScraperState
 postState PostFailure{..} = def
 postState PostDeleted{..} = ScraperState $ M.singleton postSite (deletedState siteID)
 postState PostSuccess{..} = ScraperState $ M.singleton postSite (successState siteID)
+
+postCount :: ScraperState -> Int
+postCount = M.foldr (\a n -> siteSize a + n) 0 . scraperState
+    where siteSize = IS.size . scrapedMap
 
 -- acid-state integration
 
