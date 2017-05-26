@@ -46,7 +46,8 @@ first s = fmap listToMaybe . chroots s
 -- | Helper function to run a scraper on a URL
 scrape :: URL -> Scraper LT.Text a -> BooruM a
 scrape url s = do
-    io.log "http" $ "Attempting to scrape " ++ url
+    Ctx{..} <- ask
+    when verbose $ io.log "http" $ "Attempting to scrape " ++ url
     body <- decodeUtf8 <$> fetch url
     maybe (throwB "Scraper returned no results") return $
         scrapeStringLike body s

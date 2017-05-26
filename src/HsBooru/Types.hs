@@ -197,6 +197,7 @@ data Context = Ctx
     , batchSize   :: !Int
     , threadCount :: !Int
     , minTagCount :: !Int
+    , verbose     :: !Bool
     }
 
 spawnManager :: Int -> IO Manager

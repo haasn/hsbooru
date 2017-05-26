@@ -115,8 +115,9 @@ storeImages ps = do
 -- * Overall processing logic
 
 inspectPost :: Post -> BooruM ()
-inspectPost p = io $ case p of
+inspectPost p = ask >>= \Ctx{..} -> io $ case p of
     PostFailure{..} -> logError postSite $ showID p ++ "failed: " ++ reason
+    _ | not verbose -> return ()
     PostDeleted{..} -> log      postSite $ showID p ++ "{deleted}"
     PostSuccess{..} -> log      postSite $ showID p ++ T.unpack (T.unwords tags)
     where showID p = show (siteID p) ++ " >>> "

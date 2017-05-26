@@ -29,6 +29,7 @@ data GlobalConf = Conf
     , optCapCount :: Maybe Int
     , retryCount  :: Int
     , minTagCount :: Int
+    , verbose     :: Bool
     }
 
 type Command = GlobalConf -> IO ()
@@ -149,7 +150,8 @@ parseGlobalOpts = Conf
    <> value 1000
    <> help ("How many posts to fetch before committing them all to the "++
             "database. Since this is a synchronous operation, using a lower "++
-            "value reduces throughput.")
+            "value reduces throughput; but using a too high value can "++
+            "create long stalls in the mailbox.")
     )
 
   <*> option auto
@@ -188,4 +190,11 @@ parseGlobalOpts = Conf
    <> showDefault
    <> value 0
    <> help ("Only store posts with this many tags or more.")
+    )
+
+  <*> switch
+    ( long "verbose"
+   <> short 'v'
+   <> showDefault
+   <> help ("Print data about every URL and post. Can be slow!")
     )
