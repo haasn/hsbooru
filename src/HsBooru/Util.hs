@@ -74,8 +74,9 @@ lmap f (Left  x) = Left (f x)
 lmap _ (Right x) = Right x
 
 -- | When used with ExceptT, this retries an action multiple times
-retry :: MonadPlus m => Int -> m a -> m a
-retry n = msum . replicate n
+retry :: Int -> BooruM a -> BooruM a
+retry 1 a = a
+retry n a = a `catchB` (\_ -> retry (n-1) a)
 
 -- | Like forConcurrently, but works for BooruM instead of IO. If
 -- any thread throws an exception, it will be rethrown once all threads
