@@ -22,6 +22,7 @@ import Network.HTTP.Types.Status
 import System.Directory (doesFileExist)
 import System.FilePath.Posix ((</>))
 import Streaming
+import Pipes.Concurrent
 
 import HsBooru.Conf
 import HsBooru.Types
@@ -123,6 +124,28 @@ processSite s@SiteScraper{..} (db, st) = do
                    ++    " / " ++ show (IS.size siteRange)
                    ++ " New: " ++ show (IS.size new)
 
-    let posts = S.mapM (downloadImage mgr) $ scrapeSite s mgr new
-    storeImages (db, st) $ S.chain inspectPost posts
+    -- Spawn a concurrent mailbox and connects the post stream with the
+    -- storeImages consumer via it
+    (out, inp) <- io.spawn $ bounded batchSize
+
+    -- Upstream
+    let runThread = sendOutput out . S.mapM (downloadImage mgr) . scrapeSite s mgr
+        threads   = subdivide new $ replicate threadCount runThread
+
+    forM_ threads $ \(r, f) -> lower (f r) >>= io . forkIO . void
+
+    -- Downstream
+    storeImages (db, st) . S.chain inspectPost $ streamInput inp
     ioCatch $ A.createCheckpoint st
+
+
+-- ** Pipes <-> Streaming boilerplate
+
+streamInput :: MonadIO m => Input a -> Stream (Of a) m ()
+streamInput Input{..} = go
+    where go = do ma <- io $ atomically recv
+                  case ma of Just a  -> S.yield a >> go
+                             Nothing -> return ()
+
+sendOutput :: MonadIO m => Output a -> Stream (Of a) m r -> m r
+sendOutput Output{..} ps = S.mapM_ (io . atomically . send) ps <* io performGC

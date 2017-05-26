@@ -19,6 +19,7 @@ module HsBooru.Types (
     , ioEither
     , throwB
     , catchB
+    , lower
 
     , Post(..)
     , Rating(..)
@@ -83,6 +84,9 @@ throwB = BooruM . throwE
 
 catchB :: BooruM a -> (String -> BooruM a) -> BooruM a
 catchB a h = BooruM $ runBooruM_ a `catchE` (runBooruM_ . h)
+
+lower :: BooruM a -> BooruM (IO (Either String a))
+lower (BooruM et) = return $ runExceptT et
 
 -- | A scraped post, including all metadata and status
 data Post
