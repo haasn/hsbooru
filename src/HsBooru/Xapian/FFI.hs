@@ -15,10 +15,12 @@ module HsBooru.Xapian.FFI
     , memoryDB
     , DocId
     , addDocument
+    , addSynonym
     , txBegin
     , txCommit
     ) where
 
+import Control.Arrow
 import Control.Exception
 import Control.Concurrent.MVar
 import Control.Monad.Trans.Except
@@ -28,7 +30,7 @@ import Control.Monad.IO.Class
 import qualified Data.Text.Foreign as T (withCStringLen)
 
 import Foreign
-import Foreign.C
+import Foreign.C hiding (withCStringLen)
 import System.IO.Unsafe (unsafePerformIO)
 
 import HsBooru.Types
@@ -45,6 +47,9 @@ runXM (XapianM a) = ioEither $ withLock (runExceptT a)
 
 lock :: MVar ()
 lock = unsafePerformIO $ newMVar ()
+
+withCStringLen :: Text -> ContT r IO (CString, CSize)
+withCStringLen = fmap (id *** fromIntegral) . ContT . T.withCStringLen
 
 -- Constants
 
@@ -76,8 +81,8 @@ foreign import ccall unsafe "doc_add_val_str"
 addValStr :: Document -> ValueNumber -> Text -> XapianM ()
 addValStr doc valueno val = io . evalContT $ do
     pdoc <- ContT $ withForeignPtr doc
-    (pval, len) <- ContT $ T.withCStringLen val
-    io $ cx_doc_add_val_str pdoc valueno pval (fromIntegral len)
+    (pval, len) <- withCStringLen val
+    io $ cx_doc_add_val_str pdoc valueno pval len
 
 foreign import ccall unsafe "doc_add_val_dbl"
     cx_doc_add_val_dbl :: Ptr CXapianDoc -> CUInt -> CDouble -> IO ()
@@ -92,8 +97,8 @@ foreign import ccall unsafe "doc_add_term"
 addTerm :: Document -> Text -> XapianM ()
 addTerm doc tag = io . evalContT $ do
     pdoc <- ContT $ withForeignPtr doc
-    (ptag, len) <- ContT $ T.withCStringLen tag
-    io $ cx_doc_add_term pdoc ptag (fromIntegral len)
+    (ptag, len) <- withCStringLen tag
+    io $ cx_doc_add_term pdoc ptag len
 
 -- Database and related functions
 
@@ -137,6 +142,17 @@ addDocument db doc = XapianM . ExceptT . evalContT $ do
     pdb  <- ContT $ withForeignPtr db
     pdoc <- ContT $ withForeignPtr doc
     wrapError 0 (cx_db_add_doc pdb pdoc) return
+
+foreign import ccall unsafe "db_add_synonym"
+    cx_db_add_synonym :: Ptr CXapianDB -> CString -> CSize -> CString -> CSize
+                      -> Ptr CString -> IO CUInt
+
+addSynonym :: XapianDB -> Text -> Text -> XapianM ()
+addSynonym db tag1 tag2 = XapianM . ExceptT . evalContT $ do
+    pdb <- ContT $ withForeignPtr db
+    (ptag1, len1) <- withCStringLen tag1
+    (ptag2, len2) <- withCStringLen tag2
+    wrapError 0 (cx_db_add_synonym pdb ptag1 len1 ptag2 len2) (\_ -> pure ())
 
 foreign import ccall unsafe "db_tx_begin"
     cx_db_tx_begin :: Ptr CXapianDB -> Ptr CString -> IO CUInt

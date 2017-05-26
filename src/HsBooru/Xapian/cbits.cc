@@ -53,6 +53,31 @@ void db_delete(Xapian::WritableDatabase *db)
     delete db;
 }
 
+unsigned int db_add_doc(Xapian::WritableDatabase *db, Xapian::Document *doc,
+                        const char **error)
+{
+    try {
+        return db->add_document(*doc);
+    } catch (const Xapian::Error &e) {
+        *error = e.get_msg().c_str();
+        return 0;
+    }
+}
+
+unsigned int db_add_synonym(Xapian::WritableDatabase *db,
+                            const char *tag1, size_t len1,
+                            const char *tag2, size_t len2,
+                            const char **error)
+{
+    try {
+        db->add_synonym(std::string(tag1, len1), std::string(tag2, len2));
+        return 1;
+    } catch (const Xapian::Error &e) {
+        *error = e.get_msg().c_str();
+        return 0;
+    }
+}
+
 unsigned int db_tx_begin(Xapian::WritableDatabase *db, const char **error)
 {
     try {
@@ -69,17 +94,6 @@ unsigned int db_tx_commit(Xapian::WritableDatabase *db, const char **error)
     try {
         db->commit_transaction();
         return 1;
-    } catch (const Xapian::Error &e) {
-        *error = e.get_msg().c_str();
-        return 0;
-    }
-}
-
-unsigned int db_add_doc(Xapian::WritableDatabase *db, Xapian::Document *doc,
-                        const char **error)
-{
-    try {
-        return db->add_document(*doc);
     } catch (const Xapian::Error &e) {
         *error = e.get_msg().c_str();
         return 0;

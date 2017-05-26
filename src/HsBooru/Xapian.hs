@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- | Xapian database integration
 module HsBooru.Xapian
     ( XapianM
@@ -26,10 +27,17 @@ import HsBooru.Xapian.FFI
 
 -- Utilities
 
-addTag :: Document -> Text -> Text -> XapianM ()
-addTag doc prefix = addTerm doc . (prefix <>) . T.map fix
-    where fix ' ' = '_'
-          fix c   = toLower c
+addTag :: XapianDB -> Document -> Text -> Text -> XapianM ()
+addTag db doc prefix (T.map toLower -> tag) = do
+    let isInvalid c | T.null prefix = not (isAlphaNum c)
+                    | otherwise     = False
+        validGroups = filter (not . T.null) $ T.split isInvalid tag
+        safeTag     = prefix <> T.intercalate "_" validGroups
+        fullTag     = prefix <> tag
+
+    addTerm doc $ prefix <> fullTag
+    unless (safeTag == fullTag) $
+        addSynonym db safeTag fullTag
 
 strVal :: Document -> ValueNumber -> Text -> XapianM ()
 strVal doc val = addValStr doc val . T.map toLower
@@ -49,13 +57,13 @@ xapianStore db PostSuccess{..} = do
     strVal doc fileURLSlot  fileURL
     forM_ source $ strVal doc sourceSlot
 
-    addTag doc booruPrefix    $ T.pack postSite
-    addTag doc siteIDPrefix   $ T.pack (show siteID)
-    addTag doc uploaderPrefix $ T.pack (show uploader)
-    addTag doc ratingPrefix   $ T.pack (show rating)
-    addTag doc filePrefix     $ fileName
-    addTag doc extPrefix      $ getExt fileName
-    forM_ tags $ addTag doc tagPrefix
+    addTag db doc booruPrefix    $ T.pack postSite
+    addTag db doc siteIDPrefix   $ T.pack (show siteID)
+    addTag db doc uploaderPrefix $ T.pack (show uploader)
+    addTag db doc ratingPrefix   $ T.pack (show rating)
+    addTag db doc filePrefix     $ fileName
+    addTag db doc extPrefix      $ getExt fileName
+    forM_ tags $ addTag db doc tagPrefix
 
     void $ addDocument db doc
 

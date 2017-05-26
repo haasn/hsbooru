@@ -69,7 +69,7 @@ def search(query=None, page=0, limit=10, sort=None, sortdesc=True,
 
     if query:
         flags = (QueryParser.FLAG_DEFAULT | QueryParser.FLAG_BOOLEAN_ANY_CASE |
-                 QueryParser.FLAG_PURE_NOT)
+                 QueryParser.FLAG_PURE_NOT | QueryParser.FLAG_AUTO_SYNONYMS)
         q = qp.parse_query(query, flags)
     else:
         q = Query.MatchAll
