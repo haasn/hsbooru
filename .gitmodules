@@ -1,0 +1,3 @@
+[submodule "extern/intset"]
+	path = extern/intset
+	url = https://github.com/haasn/intset.git

@@ -17,34 +17,32 @@ There's a .cabal now, but here are some of the important dependencies
 - **streaming**: used for streaming fetch/store AKA worker pattern
 - **pipes-concurrency**: used to connect aforementioned streams in parallel
 
-### Note on bitrot
-
-This uses Data.IntervalSet, which currently fails to build on modern GHC
-versions in its release version. There's an open pull request that fixes it,
-unmerged for reasons unknown to me. You can find the necessary patch here:
-
-- https://github.com/pxqr/intset/pull/3
-
-If you're a gentoo user, you can use my ebuild for this:
-
-- https://github.com/haasn/gentoo-overlay/tree/master/dev-haskell/intset
-
-You might be wondering why I switched away from `Xapian-Haskell` and started
-using my own xapian C shim; the answer is simple: `Xapian-Haskell` is
-bitrotten to hell and back and I don't even know where to begin fixing it. It
-also has a tendency to silently corrupt stuff because of treading
-`std::string`s like `const char *`s and vice versa.
-
-So to avoid all of these issues, and avoid reliance on a bitrotten library
-that needs custom patches to build anyway, I've included a small wrapper for
-the (very few) functions I actually need.
-
 ## Installation
 
-`cabal install` etc. should work. If you're a gentoo user, you can use my
-ebuild:
+Since this depends on a newer version of `intset` than what's available in the
+repos, I've added it as a local submodule. To build it correctly, you need to
+use the `new`-style cabal build system, like this:
 
-https://github.com/haasn/gentoo-overlay/blob/master/net-misc/hsbooru/hsbooru-9999.ebuild
+```
+$ git submodule update --init
+$ cabal new-build
+```
+
+You can also install the package using `cabal new-install`... well, you could
+in theory, assuming the cabal people actually got around to implementing that
+command. Oh well, life is hard.
+
+In the absence of the new build system, you can also use a local sandbox to
+build the package:
+
+```
+$ git submodule update --init
+$ cabal sandbox init
+$ cabal sandbox add-source extern/intset
+$ cabal install
+```
+
+This method also allows you to run tests (`cabal test`)
 
 ## Configuration
 

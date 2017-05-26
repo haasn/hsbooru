@@ -58,7 +58,7 @@ library
                      , acid-state >=0.14
                      , utf8-string >=1.0
                      , bytestring >=0.9
-                     , intset >=0.1
+                     , intset >=0.1.2
                      , containers >=0.4
                      , text >=1.2
                      , http-client >=0.5
