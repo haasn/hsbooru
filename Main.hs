@@ -104,7 +104,7 @@ siteInfo :: String -> Command
 siteInfo site Conf{..} = withAcid dbDir $ \acidDB -> do
     ss <- A.query acidDB (GetSite site)
     putStrLn $ "Stats for site `" ++ site ++ "`:\n"
-    printStats ss
+    printSiteStats ss
 
 infoCmd :: Mod CommandFields Command
 infoCmd = command "info" . info (siteInfo <$> siteNameOpt) $

@@ -1,22 +1,71 @@
 {-# LANGUAGE CPP, BangPatterns #-}
 module HsBooru.Stats
-    ( printStats
+    -- * Post statistics
+    ( PostStats(..)
+    , showPostStats
+    , postStats
+    -- * Site statistics
+    , printSiteStats
     , avgDepth
     , maxDepth
+    -- * Timers and misc utilities
+    , Timer
+    , newTimer
+    , measureTimer
+    , showPerf
     ) where
 
 #include "MachDeps.h"
 
 import Text.Printf
+import Data.IORef
+import System.Clock
 
 import Data.IntervalSet (IntSet(..))
 import qualified Data.IntervalSet as IS
 
 import HsBooru.Types
 
+data PostStats = PostStats { good :: !Int, gone :: !Int, fail :: !Int }
+instance Monoid PostStats where
+    mempty = PostStats 0 0 0
+    PostStats a b c `mappend` PostStats x y z = PostStats (a+x) (b+y) (c+z)
+
+postStats :: Post -> PostStats
+postStats PostSuccess{} = PostStats 1 0 0
+postStats PostDeleted{} = PostStats 0 1 0
+postStats PostFailure{} = PostStats 0 0 1
+
+-- | Helper to pretty-print post count stats
+showPostStats :: PostStats -> String
+showPostStats PostStats{..} =  "Saved: "   ++ show good
+                       ++ " Deleted: " ++ show gone
+                       ++ " Failed: "  ++ show fail
+
+
+-- | Pretty-print performance characteristics, given a count and a time delta
+-- in nanoseconds
+showPerf :: Int -> Integer -> String
+showPerf n dt = printf "%.3f posts/second" $ 10^9 * n // dt
+
+-- Nanoseconds
+type Timer = IORef Integer
+
+getClock :: IO Integer
+getClock = fmap (\TimeSpec{..} -> fi nsec + 10^9 * fi sec) $ getTime Monotonic
+    where fi = fromIntegral
+
+newTimer :: IO Timer
+newTimer = getClock >>= newIORef
+
+measureTimer :: Timer -> IO Integer
+measureTimer t = do
+    now <- getClock
+    atomicModifyIORef t $ \zen -> (now, now - zen)
+
 -- | Print out a summary of site-related statistics
-printStats :: SiteState -> IO ()
-printStats s@SiteState{..} = do
+printSiteStats :: SiteState -> IO ()
+printSiteStats s@SiteState{..} = do
     let [total, okay, fail] = map IS.size [scrapedMap, presentMap, deletedMap s]
 
     printf "Scraped count: %d\n" total

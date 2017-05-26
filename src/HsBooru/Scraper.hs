@@ -27,6 +27,7 @@ import Pipes.Concurrent
 import HsBooru.Types
 import HsBooru.Util
 import HsBooru.Xapian
+import HsBooru.Stats
 
 -- * Fetching and scraping
 
@@ -90,25 +91,10 @@ downloadImage p@PostSuccess{..} = tryDL `catchB` \reason -> return PostFailure{.
 
 -- * Database interaction and finalization
 
-data PostStats = PostStats { good :: !Int, gone :: !Int, fail :: !Int }
-instance Monoid PostStats where
-    mempty = PostStats 0 0 0
-    PostStats a b c `mappend` PostStats x y z = PostStats (a+x) (b+y) (c+z)
-
-postStats :: Post -> PostStats
-postStats PostSuccess{} = PostStats 1 0 0
-postStats PostDeleted{} = PostStats 0 1 0
-postStats PostFailure{} = PostStats 0 0 1
-
-showStats :: PostStats -> String
-showStats PostStats{..} =  "Saved: "   ++ show good
-                       ++ " Deleted: " ++ show gone
-                       ++ " Failed: "  ++ show fail
-
 -- | Store a batch of images in the database, throwing on any failure.
 -- The batch will be committed atomically, i.e. all-or-nothing.
-storeBatch :: Stream (Of Post) BooruM r -> BooruM r
-storeBatch ps = do
+storeBatch :: Timer -> Stream (Of Post) BooruM r -> BooruM r
+storeBatch t ps = do
     Ctx{..} <- ask
     let update (!r, !s, a) p = ( postState p <> r
                                , postStats p <> s
@@ -119,14 +105,17 @@ storeBatch ps = do
     -- the acid db
     runXM $ txBegin xapianDB >> storeAll >> txCommit xapianDB
     io . A.update acidDB $ UpdateSites rec
-    io.log "db" $ showStats stats
+
+    dt <- io $ measureTimer t
+    io.log "db" $ showPostStats stats ++ " => " ++ showPerf (postCount rec) dt
     return r
 
 -- | Stores all received images in batches of size batchSize
 storeImages :: Stream (Of Post) BooruM () -> BooruM ()
 storeImages ps = do
     n <- asks batchSize
-    let process = fmap (() :>) . storeBatch
+    t <- io newTimer
+    let process = fmap (() :>) . storeBatch t
     S.effects . S.mapped process $ chunksOf n ps
 
 
