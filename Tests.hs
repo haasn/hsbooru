@@ -61,19 +61,19 @@ instance Arbitrary ScraperState where
     shrink (ScraperState m) = ScraperState <$> shrink m
 
 -- mock database
-acidDB = A.openAcidState
+memDB  = A.openAcidState
 query  = flip A.query
 update = flip A.update_
 
 touchSite s = UpdateSites . postState $ PostDeleted { siteID = 1, postSite = s }
 
 prop_all_sites sites = sites == S.fromList sites'
-    where sites' = query ActiveSites $ foldr update (acidDB def) events
+    where sites' = query ActiveSites $ foldr update (memDB def) events
           events = map touchSite $ S.toList sites
 
 prop_retry ss = all IS.null [ deletedMap $ query (GetSite s) st | s <- sites ]
     where sites = M.keys $ scraperState ss
-          st = foldr (update . RetrySite) (acidDB ss) sites
+          st = foldr (update . RetrySite) (memDB ss) sites
 
 -- * HsBooru.Stats
 

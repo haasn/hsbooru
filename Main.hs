@@ -5,11 +5,14 @@ import Prelude hiding (log)
 
 import Data.Monoid ((<>))
 import Options.Applicative
+
+import GHC.Conc (getNumProcessors)
+import Control.Concurrent
 import System.Environment (getArgs)
+import System.FilePath
 
 import qualified Data.Acid as A
 
-import HsBooru.Conf
 import HsBooru.Scraper
 import HsBooru.Sites
 import HsBooru.Stats
@@ -17,7 +20,16 @@ import HsBooru.Types
 import HsBooru.Util
 import HsBooru.Xapian
 
-type Command = Mod CommandFields (InternalDB -> IO ())
+data GlobalConf = Conf
+    { dbDir       :: FilePath
+    , optImageDir :: Maybe FilePath
+    , batchSize   :: Int
+    , parCount    :: Int
+    , optCapCount :: Maybe Int
+    , retryCount  :: Int
+    }
+
+type Command = GlobalConf -> IO ()
 
 siteOpt :: Parser SiteScraper
 siteOpt = argument readSite $ metavar "SITE" <> help "booru name"
@@ -28,63 +40,135 @@ siteOpt = argument readSite $ metavar "SITE" <> help "booru name"
 siteNameOpt :: Parser String
 siteNameOpt = siteName <$> siteOpt
 
--- `scrape` command
-scrape :: [SiteScraper] -> InternalDB -> IO ()
-scrape sites st = do
-    Right db <- xapianDB xapianDir
+-- ** `scrape` command
+scrape :: [SiteScraper] -> Command
+scrape sites Conf{..} = withAcid dbDir $ \acidDB -> do
+    -- Generate context
+    let xapianDir = dbDir </> "xapian"
+        imageDir  = fromMaybe (dbDir </> "images") optImageDir
+    xapianDB <- either error id <$> localDB xapianDir
+
+    -- Spawn enough threads to make each capability have about ~parCount open
+    -- connections simultaneously
+    capCount <- case optCapCount of
+        Nothing   -> min 4 <$> getNumProcessors
+        Just jobs -> jobs  <$  setNumCapabilities jobs
+
+    let threadCount = capCount * parCount
+    manager  <- spawnManager $ threadCount + 10
+
+    -- Run scraper
     forM_ sites $ \site@SiteScraper{..} -> do
-        res <- runBooruM $ processSite site (db, st)
+        res <- runBooruM Ctx{..} $ processSite site
         case res of
             Left e  -> logError siteName e
             Right _ -> return ()
 
-    A.createArchive st
+    A.createArchive acidDB
     log "general" "Done scraping."
 
-scrapeCmd :: Command
+scrapeCmd :: Mod CommandFields Command
 scrapeCmd = command "scrape" . info (scrape <$> some siteOpt) $
     progDesc "Scrape posts from websites"
 
--- `update` command
-update :: InternalDB -> IO ()
-update st = do
-    sites <- A.query st ActiveSites
-    scrape [ ss | ss <- scrapers, siteName ss `elem` sites ] st
+-- ** `update` command
+update :: Command
+update c@Conf{..} = withAcid dbDir $ \acidDB -> do
+    sites <- A.query acidDB ActiveSites
+    scrape [ ss | ss <- scrapers, siteName ss `elem` sites ] c
 
-updateCmd :: Command
+updateCmd :: Mod CommandFields Command
 updateCmd = command "update" . info (pure update) $
     progDesc "Update all previously scraped websites"
 
--- `retry` command
-retrySite :: [String] -> InternalDB -> IO ()
-retrySite ss st = forM_ ss $ A.update st . RetrySite
+-- ** `retry` command
+retrySite :: [String] -> Command
+retrySite ss Conf{..} = withAcid dbDir $ \acidDB ->
+    forM_ ss $ A.update acidDB . RetrySite
 
-retryCmd :: Command
+retryCmd :: Mod CommandFields Command
 retryCmd = command "retry" . info (retrySite <$> some siteNameOpt) $
-    progDesc "Reset the failed post database for named sites"
+    progDesc "Reset the deleted post database for named sites"
 
--- `info` command
-siteInfo :: String -> InternalDB -> IO ()
-siteInfo site st = do
-    ss <- A.query st (GetSite site)
+-- ** `info` command
+siteInfo :: String -> Command
+siteInfo site Conf{..} = withAcid dbDir $ \acidDB -> do
+    ss <- A.query acidDB (GetSite site)
     putStrLn $ "Stats for site `" ++ site ++ "`:\n"
     printStats ss
 
-infoCmd :: Command
+infoCmd :: Mod CommandFields Command
 infoCmd = command "info" . info (siteInfo <$> siteNameOpt) $
     progDesc "Show some statistics about a named site"
 
--- Main
+-- * Main
 
-opts :: ParserInfo (InternalDB -> IO ())
-opts = info (hsubparser commands <**> helper) $
-    fullDesc
- <> header "hsbooru - a haskell *booru scraper using xapian"
-
-    where commands = scrapeCmd <> updateCmd <> retryCmd <> infoCmd
+opts :: ParserInfo (IO ())
+opts = info (liftA2 ($) parseCmd parseGlobalOpts <**> helper) $ fullDesc
+    <> header "hsbooru - a haskell *booru scraper using xapian"
+    where parseCmd = hsubparser $ scrapeCmd <> updateCmd <> retryCmd <> infoCmd
 
 main :: IO ()
-main = customExecParser parserOpts opts >>= withAcid
+main = join $ customExecParser parserOpts opts
     where parserOpts = prefs $ showHelpOnError
                             <> showHelpOnEmpty
                             <> multiSuffix ".."
+                            <> columns 100
+
+-- ** Global option boilerplate
+
+parseGlobalOpts :: Parser GlobalConf
+parseGlobalOpts = Conf
+  <$> strOption
+    ( long "dbDir"
+   <> short 'd'
+   <> metavar "DIR"
+   <> help "Database directory"
+    )
+
+  <*> (optional.strOption)
+    ( long "imageDir"
+   <> short 'i'
+   <> metavar "DIR"
+   <> help ("Directory to store images in. Defaults to `<dbDir>/images`.")
+    )
+
+  <*> option auto
+    ( long "batchsize"
+   <> short 'b'
+   <> metavar "N"
+   <> showDefault
+   <> value 1000
+   <> help ("How many posts to fetch before committing them all to the "++
+            "database. Since this is a synchronous operation, using a lower "++
+            "value reduces throughput.")
+    )
+
+  <*> option auto
+    ( long "parallelism"
+   <> short 'p'
+   <> metavar "N"
+   <> showDefault
+   <> value 2
+   <> help ("How many in-flight requests to maintain per thread. Increasing "++
+            "this can improve throughput but going too high risks running "++
+            "into network errors as the site kills connections.")
+    )
+
+  <*> (optional.option auto)
+    ( long "jobs"
+   <> short 'j'
+   <> metavar "N"
+   <> help ("How many threads to scrape from in parallel. Defaults to the "++
+            "of detected CPU cores, but no more than 4. Going too high can "++
+            "be slower, if the server decides to rate limit.")
+    )
+
+  <*> option auto
+    ( long "retryCount"
+   <> short 'r'
+   <> metavar "N"
+   <> showDefault
+   <> value 3
+   <> help ("How often to retry each network request before giving up.")
+    )

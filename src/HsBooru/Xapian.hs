@@ -3,7 +3,7 @@
 module HsBooru.Xapian
     ( XapianM
     , XapianDB
-    , xapianDB
+    , localDB
     , runXM
     , xapianStore
     , txBegin
@@ -20,12 +20,32 @@ import System.FilePath.Posix (takeExtension)
 import qualified Data.ByteString.UTF8 as UTF8
 import qualified Data.Text as T
 
-import HsBooru.Conf
 import HsBooru.Types
 import HsBooru.Util
 import HsBooru.Xapian.FFI
 
--- Utilities
+runXM :: XapianM a -> BooruM a
+runXM = ioEither . runXM_
+
+-- * Internal constants
+
+-- Term prefix mapping, for reusable tags
+booruPrefix    = "B" -- Booru name the post was scraped from
+siteIDPrefix   = "I" -- The site-specific ID
+uploaderPrefix = "U" -- Post uploader, ID or name (if available)
+ratingPrefix   = "R" -- File rating, e.g. `safe` or `questionable`
+extPrefix      = "E" -- File extension, e.g. `png`
+filePrefix     = "F" -- Filename, so you can search for posts by name
+tagPrefix      = ""  -- Generic content tags
+
+-- Value mapping, for per-document unique identification and sorting
+siteIDSlot   = 0 -- Site-specific ID
+scoreSlot    = 1 -- User score assigned to the website
+fileNameSlot = 2 -- Name the file is stored under
+fileURLSlot  = 3 -- URL the file was downloaded from
+sourceSlot   = 4 -- Website's literal "Source" field, if it has one
+
+-- * Utilities
 
 addTag :: XapianDB -> Document -> Text -> Text -> XapianM ()
 addTag db doc prefix (T.map toLower -> tag) = do

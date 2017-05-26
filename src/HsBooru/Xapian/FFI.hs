@@ -1,7 +1,7 @@
 {-# LANGUAGE ForeignFunctionInterface, GeneralizedNewtypeDeriving #-}
 module HsBooru.Xapian.FFI
     ( XapianM
-    , runXM
+    , runXM_
     -- * Document
     , Document
     , ValueNumber
@@ -11,7 +11,7 @@ module HsBooru.Xapian.FFI
     , addTerm
     -- * Database
     , XapianDB
-    , xapianDB
+    , localDB
     , memoryDB
     , DocId
     , addDocument
@@ -27,22 +27,20 @@ import Control.Monad.Trans.Except
 import Control.Monad.Trans.Cont
 import Control.Monad.IO.Class
 
+import Data.Text (Text)
 import qualified Data.Text.Foreign as T (withCStringLen)
 
 import Foreign
 import Foreign.C hiding (withCStringLen)
 import System.IO.Unsafe (unsafePerformIO)
 
-import HsBooru.Types
-import HsBooru.Util
-
 -- | Xapian calls are hidden behind a newtype because access to xapian
 -- is not thread safe. This allows the library to ensure correct locking.
 newtype XapianM a = XapianM { runXapianM :: ExceptT String IO a }
     deriving (Functor, Applicative, Monad, MonadIO)
 
-runXM :: XapianM a -> BooruM a
-runXM (XapianM a) = ioEither $ withLock (runExceptT a)
+runXM_ :: XapianM a -> IO (Either String a)
+runXM_ (XapianM a) = withLock $ runExceptT a
     where withLock = bracket (takeMVar lock) (putMVar lock) . const
 
 lock :: MVar ()
@@ -71,7 +69,7 @@ foreign import ccall unsafe "&doc_delete"
     cx_doc_del :: FunPtr (Ptr CXapianDoc -> IO ())
 
 newDoc :: XapianM Document
-newDoc = io $ cx_doc_new >>= newForeignPtr cx_doc_del
+newDoc = liftIO $ cx_doc_new >>= newForeignPtr cx_doc_del
 
 type ValueNumber = CUInt
 
@@ -79,26 +77,26 @@ foreign import ccall unsafe "doc_add_val_str"
     cx_doc_add_val_str :: Ptr CXapianDoc -> CUInt -> CString -> CSize -> IO ()
 
 addValStr :: Document -> ValueNumber -> Text -> XapianM ()
-addValStr doc valueno val = io . evalContT $ do
+addValStr doc valueno val = liftIO . evalContT $ do
     pdoc <- ContT $ withForeignPtr doc
     (pval, len) <- withCStringLen val
-    io $ cx_doc_add_val_str pdoc valueno pval len
+    liftIO $ cx_doc_add_val_str pdoc valueno pval len
 
 foreign import ccall unsafe "doc_add_val_dbl"
     cx_doc_add_val_dbl :: Ptr CXapianDoc -> CUInt -> CDouble -> IO ()
 
 addValDouble :: Document -> ValueNumber -> Double -> XapianM ()
-addValDouble doc valueno val = io . withForeignPtr doc $ \pdoc -> do
+addValDouble doc valueno val = liftIO . withForeignPtr doc $ \pdoc -> do
     cx_doc_add_val_dbl pdoc valueno (CDouble val)
 
 foreign import ccall unsafe "doc_add_term"
     cx_doc_add_term :: Ptr CXapianDoc -> CString -> CSize -> IO ()
 
 addTerm :: Document -> Text -> XapianM ()
-addTerm doc tag = io . evalContT $ do
+addTerm doc tag = liftIO . evalContT $ do
     pdoc <- ContT $ withForeignPtr doc
     (ptag, len) <- withCStringLen tag
-    io $ cx_doc_add_term pdoc ptag len
+    liftIO $ cx_doc_add_term pdoc ptag len
 
 -- Database and related functions
 
@@ -110,8 +108,8 @@ wrapError :: Eq a => a -> (Ptr CString -> IO a) -> (a -> IO b)
           -> ContT r IO (Either String b)
 wrapError badVal action good = do
     err <- ContT alloca
-    res <- io $ action err
-    io $ if res == badVal
+    res <- liftIO $ action err
+    liftIO $ if res == badVal
         then Left  <$> (peekCString =<< peek err)
         else Right <$> good res
 
@@ -126,8 +124,8 @@ openDB flags path = evalContT $ do
     cst <- ContT $ withCString path
     wrapError nullPtr (cx_db_open cst flags) (newForeignPtr cx_db_delete)
 
-xapianDB :: FilePath -> IO (Either String XapianDB)
-xapianDB = openDB db_create_or_open
+localDB :: FilePath -> IO (Either String XapianDB)
+localDB = openDB db_create_or_open
 
 memoryDB :: IO (Either String XapianDB)
 memoryDB = openDB db_backend_inmemory ""

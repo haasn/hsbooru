@@ -6,14 +6,18 @@ module HsBooru.Types (
     -- * Module re-exports for convenience
       module Control.Applicative
     , module Control.Monad
+    , module Control.Monad.Reader
     , module Data.Default
     , module Data.List
     , module Data.Maybe
     , module Data.Monoid
     , module Data.Text
     , module Network.HTTP.Client
+    , module System.FilePath
 
     -- * Main types
+    , Context(..)
+    , spawnManager
     , BooruM(BooruM)
     , runBooruM
     , ioEither
@@ -51,7 +55,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
-import Control.Monad.Reader (asks)
+import Control.Monad.Reader
 import Control.Monad.State (modify)
 
 import Data.SafeCopy
@@ -62,64 +66,16 @@ import Data.Maybe
 import Data.Monoid
 import Data.Text (Text)
 import Network.HTTP.Client
+import Network.HTTP.Client.TLS (tlsManagerSettings)
+import System.FilePath
 
 import qualified Data.Acid as A
 import qualified Data.IntervalSet as IS
 import qualified Data.Map as M
 
-import HsBooru.Conf
+import HsBooru.Xapian.FFI (XapianDB)
 
--- | Internal monad for early termination and configuration
-newtype BooruM a = BooruM { runBooruM_ :: ExceptT String IO a }
-    deriving (Functor, Applicative, Monad, MonadIO, Alternative, MonadPlus)
-
-ioEither :: IO (Either String a) -> BooruM a
-ioEither = BooruM . ExceptT
-
-runBooruM :: BooruM a -> IO (Either String a)
-runBooruM = runExceptT . runBooruM_
-
-throwB :: String -> BooruM a
-throwB = BooruM . throwE
-
-catchB :: BooruM a -> (String -> BooruM a) -> BooruM a
-catchB a h = BooruM $ runBooruM_ a `catchE` (runBooruM_ . h)
-
-lower :: BooruM a -> BooruM (IO (Either String a))
-lower (BooruM et) = return $ runExceptT et
-
--- | A scraped post, including all metadata and status
-data Post
-    -- | Post was successfully scraped
-    = PostSuccess { siteID   :: !Int
-                  , postSite :: !String
-                  , rating   :: !Rating
-                  , uploader :: !Int
-                  , score    :: !Int
-                  , source   :: !(Maybe Text)
-                  , fileURL  :: !Text
-                  , fileName :: !Text
-                  , tags     :: ![Text] }
-    -- | Post scrape was attempted and failed for some reason, included
-    | PostFailure { siteID   :: !Int
-                  , postSite :: !String
-                  , reason   :: !String }
-    -- | Post scrape was successful but the file was confirmed to be deleted
-    | PostDeleted { siteID   :: !Int
-                  , postSite :: !String }
-    deriving Show
-
-data Rating = Safe | Questionable | Explicit
-    deriving (Show, Read)
-
--- | A site-specific scraper definition
-data SiteScraper = SiteScraper
-    { siteName :: String
-    , idRange  :: Manager -> BooruM PostSet
-    , scrapeID :: Manager -> Int -> BooruM Post
-    }
-
--- Scraper internal state and database
+-- * Scraper internal state and database
 
 -- | An efficient (interval-packed) set of post IDs
 type PostSet = IS.IntSet
@@ -199,16 +155,11 @@ instance Migrate ScraperState where
     type MigrateFrom ScraperState = M.Map String SiteState
     migrate = ScraperState
 
-postState :: Post -> ScraperState
-postState PostFailure{..} = def
-postState PostDeleted{..} = ScraperState $ M.singleton postSite (deletedState siteID)
-postState PostSuccess{..} = ScraperState $ M.singleton postSite (successState siteID)
-
 postCount :: ScraperState -> Int
 postCount = M.foldr (\a n -> siteSize a + n) 0 . scraperState
     where siteSize = IS.size . scrapedMap
 
--- acid-state integration
+-- ** acid-state integration
 
 deriveSafeCopy 0 'base ''IS.IntSet
 deriveSafeCopy 0 'base ''SiteState_v0
@@ -234,9 +185,80 @@ retrySite site = modify $ ScraperState . M.adjust reset site . scraperState
 
 A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite, 'updateSites, 'retrySite]
 
+-- | Global context record
+data Context = Ctx
+    { xapianDB    :: !XapianDB
+    , acidDB      :: !InternalDB
+    , manager     :: !Manager
+    , retryCount  :: !Int
+    , batchSize   :: !Int
+    , threadCount :: !Int
+    , imageDir    :: !FilePath
+    }
+
+spawnManager :: Int -> IO Manager
+spawnManager n = newManager $ tlsManagerSettings { managerConnCount = n }
+
+-- | Internal monad for early termination and configuration
+newtype BooruM a = BooruM { runBooruM_ :: ExceptT String (ReaderT Context IO) a }
+    deriving (Functor, Applicative, Monad, MonadIO, MonadReader Context)
+
+ioEither :: IO (Either String a) -> BooruM a
+ioEither = BooruM . ExceptT . lift
+
+runBooruM :: Context -> BooruM a -> IO (Either String a)
+runBooruM ctx = flip runReaderT ctx . runExceptT . runBooruM_
+
+throwB :: String -> BooruM a
+throwB = BooruM . throwE
+
+catchB :: BooruM a -> (String -> BooruM a) -> BooruM a
+catchB a h = BooruM $ runBooruM_ a `catchE` (runBooruM_ . h)
+
+lower :: BooruM a -> BooruM (IO (Either String a))
+lower (BooruM et) = runReaderT (runExceptT et) <$> ask
+
+-- | A scraped post, including all metadata and status
+data Post
+    -- | Post was successfully scraped
+    = PostSuccess { siteID   :: !Int
+                  , postSite :: !String
+                  , rating   :: !Rating
+                  , uploader :: !Int
+                  , score    :: !Int
+                  , source   :: !(Maybe Text)
+                  , fileURL  :: !Text
+                  , fileName :: !Text
+                  , tags     :: ![Text] }
+    -- | Post scrape was attempted and failed for some reason, included
+    | PostFailure { siteID   :: !Int
+                  , postSite :: !String
+                  , reason   :: !String }
+    -- | Post scrape was successful but the file was confirmed to be deleted
+    | PostDeleted { siteID   :: !Int
+                  , postSite :: !String }
+    deriving Show
+
+data Rating = Safe | Questionable | Explicit
+    deriving (Show, Read)
+
+postState :: Post -> ScraperState
+postState PostFailure{..} = def
+postState PostDeleted{..} = ScraperState $ M.singleton postSite (deletedState siteID)
+postState PostSuccess{..} = ScraperState $ M.singleton postSite (successState siteID)
+
+-- | A site-specific scraper definition
+data SiteScraper = SiteScraper
+    { siteName :: String
+    , idRange  :: BooruM PostSet
+    , scrapeID :: Int -> BooruM Post
+    }
+
 -- Utility
 
 type InternalDB = A.AcidState ScraperState
 
-withAcid :: (InternalDB -> IO a) -> IO a
-withAcid = bracket (A.openLocalStateFrom acidDir def) A.closeAcidState
+-- | Opens the acid DB given the dbDir path
+withAcid :: FilePath -> (InternalDB -> IO a) -> IO a
+withAcid dbDir = bracket (A.openLocalStateFrom acidDir def) A.closeAcidState
+    where acidDir = dbDir </> "acid"

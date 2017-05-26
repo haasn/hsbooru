@@ -8,13 +8,11 @@ module HsBooru.Util
     , io
     , ioCatch
     , retry
-    , forConcurrentlyB
     ) where
 
 import Prelude hiding (log)
 
 import Control.Exception
-import Control.Concurrent.Async
 import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.IO.Class
@@ -77,11 +75,3 @@ lmap _ (Right x) = Right x
 retry :: Int -> BooruM a -> BooruM a
 retry 1 a = a
 retry n a = a `catchB` (\_ -> retry (n-1) a)
-
--- | Like forConcurrently, but works for BooruM instead of IO. If
--- any thread throws an exception, it will be rethrown once all threads
--- complete.
-forConcurrentlyB :: Traversable t => t a -> (a -> BooruM b) -> BooruM (t b)
-forConcurrentlyB ts f = recombine distribute
-    where distribute = mapConcurrently (runBooruM . f) ts
-          recombine  = ioEither . fmap sequence

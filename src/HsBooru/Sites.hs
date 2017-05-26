@@ -21,7 +21,6 @@ import qualified Data.IntervalSet as IS
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as LT
 
-import HsBooru.Conf
 import HsBooru.Scraper
 import HsBooru.Types
 import HsBooru.Util
@@ -44,10 +43,10 @@ first :: Selector -> Scraper LT.Text a -> Scraper LT.Text (Maybe a)
 first s = fmap listToMaybe . chroots s
 
 -- | Helper function to run a scraper on a URL
-scrape :: Manager -> URL -> Scraper LT.Text a -> BooruM a
-scrape mgr url s = do
+scrape :: URL -> Scraper LT.Text a -> BooruM a
+scrape url s = do
     io.log "http" $ "Attempting to scrape " ++ url
-    body <- decodeUtf8 <$> fetch mgr url
+    body <- decodeUtf8 <$> fetch url
     maybe (throwB "Scraper returned no results") return $
         scrapeStringLike body s
 
@@ -66,19 +65,19 @@ gelbooru = SiteScraper{..}
           postSite = siteName
           apiURL   = "https://gelbooru.com/index.php?page=dapi&s=post&q=index"
 
-          idRange mgr = do
+          idRange = do
                 -- To get the highest ID, we fetch a single post and read out
                 -- its id attribute. This will always be the newest
                 let indexURL = apiURL ++ "&limit=1"
-                c <- scrape mgr indexURL $ attrRead "id" "post"
+                c <- scrape indexURL $ attrRead "id" "post"
                 return $ IS.interval 1 c
 
-          scrapeID mgr siteID = do
+          scrapeID siteID = do
                 let postURL = apiURL ++ "&id=" ++ show siteID
                     count   = attrRead "count" "posts"
                     post    = first "post" scrapePost
 
-                res <- scrape mgr postURL $ liftM2 (,) count post
+                res <- scrape postURL $ liftM2 (,) count post
                 return $ case res of
                     (1, Just p)  -> p
                     (0, Nothing) -> PostDeleted{..}

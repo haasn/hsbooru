@@ -1,5 +1,5 @@
 name:                hsbooru
-version:             2.2.0.0
+version:             2.3.0.0
 synopsis:            booru scraper based on xapian
 license:             GPL-3
 license-file:        LICENSE
@@ -21,8 +21,7 @@ library
   ghc-options:         -O2
   hs-source-dirs:      src
 
-  exposed-modules:     HsBooru.Conf
-                     , HsBooru.Scraper
+  exposed-modules:     HsBooru.Scraper
                      , HsBooru.Sites
                      , HsBooru.Stats
                      , HsBooru.Types
@@ -79,6 +78,7 @@ executable hsbooru
 
   build-depends:       base
                      , hsbooru
+                     , filepath >=1.4
                      , acid-state >=0.14
                      , optparse-applicative >=0.13
 
