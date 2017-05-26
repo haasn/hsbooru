@@ -32,7 +32,7 @@ runXM = ioEither . runXM_
 -- Term prefix mapping, for reusable tags
 booruPrefix    = "B" -- Booru name the post was scraped from
 siteIDPrefix   = "I" -- The site-specific ID
-uploaderPrefix = "U" -- Post uploader, ID or name (if available)
+uploaderPrefix = "U" -- Post uploader, in the format id@site
 ratingPrefix   = "R" -- File rating, e.g. `safe` or `questionable`
 extPrefix      = "E" -- File extension, e.g. `png`
 filePrefix     = "F" -- Filename, so you can search for posts by name
@@ -79,7 +79,7 @@ xapianStore db PostSuccess{..} = do
 
     addTag db doc booruPrefix    $ T.pack postSite
     addTag db doc siteIDPrefix   $ T.pack (show siteID)
-    addTag db doc uploaderPrefix $ T.pack (show uploader)
+    addTag db doc uploaderPrefix $ T.pack (show uploader ++ "@" ++ postSite)
     addTag db doc ratingPrefix   $ T.pack (show rating)
     addTag db doc filePrefix     $ fileName
     addTag db doc extPrefix      $ getExt fileName
