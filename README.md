@@ -17,7 +17,13 @@ There's a .cabal now, but here are some of the important dependencies
 - **streaming**: used for streaming fetch/store AKA worker pattern
 - **pipes-concurrency**: used to connect aforementioned streams in parallel
 
+Also, you'll need to have xapian-core installed, which cabal can't do
+automatically. Refer to your packages. I don't think the version really
+matters, but I'm on 1.4.X.
+
 ## Installation
+
+**IMPORTANT**: Remember to install xapian (usually called `xapian-core`) first!
 
 Since this depends on a newer version of `intset` than what's available in the
 repos, I've added it as a local submodule. To build it correctly, you need to
