@@ -1,5 +1,5 @@
 name:                hsbooru
-version:             2.3.1.0
+version:             2.3.1.1
 synopsis:            booru scraper based on xapian
 license:             GPL-3
 license-file:        LICENSE
