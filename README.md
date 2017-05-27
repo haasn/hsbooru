@@ -21,6 +21,13 @@ Also, you'll need to have xapian-core installed, which cabal can't do
 automatically. Refer to your packages. I don't think the version really
 matters, but I'm on 1.4.X.
 
+## Packages
+
+- [ebuild](https://github.com/haasn/gentoo-overlay/blob/master/net-misc/hsbooru/hsbooru-9999.ebuild)
+  (*Note*: see also [intset-0.1.2.0.ebuild](https://github.com/haasn/gentoo-overlay/blob/master/dev-haskell/intset/intset-0.1.2.0.ebuild))
+
+- [PKGBUILD (AUR)](https://aur.archlinux.org/packages/hsbooru-git/)
+
 ## Installation
 
 **IMPORTANT**: Remember to install xapian (usually called `xapian-core`) first!
