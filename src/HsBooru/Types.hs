@@ -33,9 +33,10 @@ module HsBooru.Types (
     , SiteState(..)
     , ScraperState(..)
     , InternalDB
+    , makeSiteState
 
-    -- * PostSets and utilities
-    , PostSet
+    -- * IntSets and utilities
+    , IntSet
     , successState
     , deletedState
     , postState
@@ -64,6 +65,7 @@ import Control.Monad.State (modify)
 
 import Data.SafeCopy
 import Data.Default
+import Data.IntervalSet (IntSet)
 import Data.List
 import Data.List.Split
 import Data.Maybe
@@ -84,53 +86,85 @@ import HsBooru.Xapian.FFI (XapianDB)
 
 -- * Scraper internal state and database
 
--- | An efficient (interval-packed) set of post IDs
-type PostSet = IS.IntSet
-
 -- Invariant: successMap and failedMap are disjoint
 data SiteState_v0 = SiteState_v0
-    { successMap_v0 :: !PostSet
-    , failedMap_v0  :: !PostSet
+    { successMap_v0 :: !IntSet
+    , failedMap_v0  :: !IntSet
     }
+
+data SiteState_v1 = SiteState_v1
+    { scrapedMap_v1 :: !IntSet
+    , presentMap_v1 :: !IntSet
+    }
+
+instance Migrate SiteState_v1 where
+    type MigrateFrom SiteState_v1 = SiteState_v0
+    migrate SiteState_v0{..} = SiteState_v1{..}
+        where scrapedMap_v1 = successMap_v0 `IS.union` failedMap_v0
+              presentMap_v1 = successMap_v0
 
 -- | The internal state we store for a site, which is basically just a map of
 -- the site's scraped / downloaded post range. Invariant: presentMap is a
 -- subset of scrapedMap
 data SiteState = SiteState
-    { scrapedMap :: !PostSet -- ^ Posts that were successfully scraped
-    , presentMap :: !PostSet -- ^ Posts that were successfully downloaded
+    { scrapedMap :: !IntSet -- ^ Posts that were successfully scraped
+    , presentMap :: !IntSet -- ^ Posts that were successfully downloaded
+    , authorMap  :: !IntSet -- ^ Author IDs that we've heard about
+    , knownMap   :: !IntSet -- ^ Author IDs that we know
     } deriving (Show, Eq)
 
 instance Migrate SiteState where
-    type MigrateFrom SiteState = SiteState_v0
-    migrate SiteState_v0{..} = SiteState{..}
-        where scrapedMap = successMap_v0 `IS.union` failedMap_v0
-              presentMap = successMap_v0
+    type MigrateFrom SiteState = SiteState_v1
+    migrate SiteState_v1{..} = SiteState{..}
+        where scrapedMap = scrapedMap_v1
+              presentMap = presentMap_v1
+              authorMap  = IS.empty
+              knownMap   = IS.empty
 
 instance Monoid SiteState where
     mempty = def
-    mappend (SiteState sa pa) (SiteState sb pb) = SiteState{..}
+    mappend (SiteState sa pa aa ka) (SiteState sb pb ab kb) = SiteState{..}
         where scrapedMap = IS.union sa sb
               presentMap = IS.union pa pb
+              authorMap  = IS.union aa ab
+              knownMap   = IS.union ka kb
 
 instance Default SiteState where
-    def = SiteState IS.empty IS.empty
+    def = SiteState IS.empty IS.empty IS.empty IS.empty
+
+-- | Arguments: scrapedMap, presentMap, authorMap, knownMap.
+-- The superset invariants are enforced
+makeSiteState :: IntSet -> IntSet -> IntSet -> IntSet -> SiteState
+makeSiteState sm pm am km = SiteState
+    { scrapedMap = sm
+    , presentMap = IS.intersection sm pm
+    , authorMap  = am
+    , knownMap   = IS.intersection am km
+    }
 
 -- | Posts that were scraped but marked as missing/deleted
-deletedMap :: SiteState -> PostSet
+deletedMap :: SiteState -> IntSet
 deletedMap SiteState{..} = scrapedMap `IS.difference` presentMap
 
 -- | The basic constructors for the site state, representing the state of a
 -- single file (either successfully downloaded or marked as deleted)
-successState, deletedState :: Int -> SiteState
-successState id = (deletedState id) { presentMap = IS.singleton id }
+deletedState :: Int -> SiteState
 deletedState id = def { scrapedMap = IS.singleton id }
 
+-- | In contrast to deletedState, this also takes an authorID as a second
+-- parameter
+successState :: Int -> Int -> SiteState
+successState id author =
+    def { presentMap = IS.singleton id
+        , scrapedMap = IS.singleton id
+        , authorMap  = IS.singleton author
+        }
+
 -- | Helper function to implement divide-and-conquer algorithms. Given a range
--- of input values, subdivides the post set onto these input values in a manner
+-- of input values, subdivides the int set onto these input values in a manner
 -- that tries to be fair. The resulting postsets are guaranteed to be disjoint,
 -- although they're not guaranteed to be non-empty.
-subdivide :: PostSet -> [a] -> [(PostSet, a)]
+subdivide :: IntSet -> [a] -> [(IntSet, a)]
 subdivide _ [ ] = []
 subdivide s [a] = [(s, a)]
 subdivide ss as = subdivide sl al ++ subdivide sr ar
@@ -139,7 +173,7 @@ subdivide ss as = subdivide sl al ++ subdivide sr ar
 
 -- Try to fairly split an intervalset in half by splitting along the estimated
 -- median
-splitIS :: PostSet -> (PostSet, PostSet)
+splitIS :: IntSet -> (IntSet, IntSet)
 splitIS ps | IS.null ps = (ps, ps)
 splitIS ps = (fix left, right)
     where (left, right) = IS.split mid ps
@@ -170,7 +204,8 @@ postCount = M.foldr (\a n -> siteSize a + n) 0 . scraperState
 
 deriveSafeCopy 0 'base ''IS.IntSet
 deriveSafeCopy 0 'base ''SiteState_v0
-deriveSafeCopy 1 'extension ''SiteState
+deriveSafeCopy 1 'extension ''SiteState_v1
+deriveSafeCopy 2 'extension ''SiteState
 deriveSafeCopy 1 'extension ''ScraperState
 
 activeSites :: A.Query ScraperState [String]
@@ -276,13 +311,14 @@ data Rating = Safe | Questionable | Explicit
 
 postState :: Post -> ScraperState
 postState PostFailure{..} = def
-postState PostDeleted{..} = ScraperState $ M.singleton postSite (deletedState siteID)
-postState PostSuccess{..} = ScraperState $ M.singleton postSite (successState siteID)
+postState post = ScraperState . M.singleton (postSite post) $ case post of
+    PostDeleted{..} -> deletedState siteID
+    PostSuccess{..} -> successState siteID uploader
 
 -- | A site-specific scraper definition
 data SiteScraper = SiteScraper
     { siteName :: String
-    , idRange  :: BooruM PostSet
+    , idRange  :: BooruM IntSet
     , scrapeID :: Int -> BooruM Post
     }
 

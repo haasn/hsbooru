@@ -46,7 +46,7 @@ prop_ss_union    ss = scrapedMap ss == presentMap ss `IS.union` deletedMap ss
 prop_ss_superset_pm ss = scrapedMap ss `IS.isSupersetOf` presentMap ss
 prop_ss_superset_fm ss = scrapedMap ss `IS.isSupersetOf` deletedMap ss
 
-prop_success_overrides i = successState i <> deletedState i == successState i
+prop_success_overrides i = successState i 0 <> deletedState i == successState i 0
 
 prop_subdivide_all p l = map snd (subdivide p l) `sameList` (l :: [Int])
 
@@ -58,16 +58,14 @@ prop_subdivide_disjoint p l = and $ zipWith disjoint ps (drop 1 ps)
           disjoint x y = IS.null $ IS.intersection x y
 
 instance Arbitrary SiteState where
-    -- We have to make sure to preserve the invariant that scrapedMap is a
-    -- superset of presentMap
-    arbitrary = do
-        sm <- arbitrary
-        pm <- arbitrary
-        return $ SiteState sm (IS.intersection sm pm)
+    arbitrary = makeSiteState <$> arb <*> arb <*> arb <*> arb
+        where arb = arbitrary
 
-    shrink (SiteState sm pm) =
-        [ SiteState sm p | p <- shrink pm ]
-     ++ [ SiteState s $ IS.intersection s pm | s <- shrink sm ]
+    shrink (SiteState sm pm am km) =
+         [ makeSiteState s' pm am km | s' <- shrink sm ]
+      ++ [ makeSiteState sm p' am km | p' <- shrink pm ]
+      ++ [ makeSiteState sm pm a' km | a' <- shrink am ]
+      ++ [ makeSiteState sm pm am k' | k' <- shrink km ]
 
 instance Arbitrary ScraperState where
     arbitrary = ScraperState <$> arbitrary

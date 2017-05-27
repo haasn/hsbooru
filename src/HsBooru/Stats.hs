@@ -75,12 +75,26 @@ printSiteStats s@SiteState{..} = do
     printf "=> Deleted ratio: %.2f%%\n" $ 100 * fail // total
     printf "\n"
 
+    let [seen, know] = map IS.size [authorMap, knownMap]
+
+    printf "Authors seen:  %d\n" seen
+    printf "Authors known: %d\n" know
+    printf "\n"
+
     printf "## scrapedMap stats:\n"
     isStats scrapedMap
     printf "\n"
 
     printf "## presentMap stats:\n"
     isStats presentMap
+    printf "\n"
+
+    printf "## authorMap stats:\n"
+    isStats authorMap
+    printf "\n"
+
+    printf "## knownMap stats:\n"
+    isStats knownMap
 
 (//) :: (Integral a, Integral b) => a -> b -> Double
 a // b = fromIntegral a / fromIntegral b

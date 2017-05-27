@@ -28,8 +28,8 @@ import HsBooru.Stats
 
 -- * Fetching and scraping
 
--- | Run a scraper on a website and range, returning a stream of Posts.
-scrapeSite :: SiteScraper -> PostSet -> Stream (Of Post) BooruM ()
+-- | Run a scraper on a website and range of posts, returning a stream of Posts
+scrapeSite :: SiteScraper -> IntSet -> Stream (Of Post) BooruM ()
 scrapeSite SiteScraper{..} = go where
     go posts | IS.null posts = return ()
     go posts = do
