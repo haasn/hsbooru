@@ -8,14 +8,16 @@ import Test.Framework.Providers.HUnit
 import Test.QuickCheck hiding (verbose)
 import Test.HUnit
 
+import Data.Char
 import Data.Time
 
 import qualified Data.Acid as A
 import qualified Data.Acid.Memory as A
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.IntervalSet as IS
-import qualified Data.Set as Set
 import qualified Data.Map as M
+import qualified Data.Text as T
+import qualified Data.Set as Set
 import qualified Streaming.Prelude as S
 
 import HsBooru.Types
@@ -171,3 +173,19 @@ case_gelbooru_invalid = do
 -- * HsBooru.Stats
 
 prop_depth ps = avgDepth ps <= fromIntegral (maxDepth ps)
+
+-- * HsBooru.Xapian
+
+instance Arbitrary Text where
+    arbitrary = T.pack <$> arbitrary
+    shrink    = map T.pack . shrink . T.unpack
+
+prop_sanitize_valid = T.all isValid . sanitizeTag
+    where isValid '_' = True
+          isValid  c  = isAlphaNum c
+
+prop_sanitize_nonempty = not . T.null . sanitizeTag
+
+case_sanitize_easy   = sanitizeTag "one-piece_swimsuit" @?= "one_piece_swimsuit"
+case_sanitize_tricky = sanitizeTag ":)" @?= "_"
+case_sanitize_empty  = sanitizeTag ""   @?= "_"

@@ -104,3 +104,4 @@ test-suite hsbooru-tests
                      , intset >=0.1
                      , containers >=0.4
                      , streaming >=0.1
+                     , text >=1.2

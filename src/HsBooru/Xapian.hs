@@ -9,6 +9,7 @@ module HsBooru.Xapian
     , xapianStore
     , txBegin
     , txCommit
+    , sanitizeTag
     ) where
 
 import Control.Concurrent.MVar
@@ -52,15 +53,21 @@ uploadedSlot = 5 -- Upload timestamp
 
 addTag :: XapianDB -> Document -> Text -> Text -> XapianM ()
 addTag db doc prefix (T.map toLower -> tag) = do
-    let isInvalid c | T.null prefix = not (isAlphaNum c)
-                    | otherwise     = False
-        validGroups = filter (not . T.null) $ T.split isInvalid tag
-        safeTag     = prefix <> T.intercalate "_" validGroups
-        fullTag     = prefix <> tag
+    let fullTag = prefix <> tag
+        safeTag | T.null prefix = sanitizeTag tag
+                | otherwise     = fullTag
 
     addTerm doc $ fullTag
-    unless (safeTag == fullTag || T.null safeTag) $
+    unless (safeTag == fullTag) $
         addSynonym db safeTag fullTag
+
+-- | Sanitize a tag by reducing it to the groups of of valid characters,
+-- separated by _ characters. If the tag has no valid characters, the result is
+-- simply "_" itself.
+sanitizeTag :: Text -> Text
+sanitizeTag tag | null validGroups = "_"
+                | otherwise        = T.intercalate "_" validGroups
+    where validGroups = filter (not . T.null) $ T.split (not . isAlphaNum) tag
 
 strVal :: Document -> ValueNumber -> Text -> XapianM ()
 strVal doc val = addValStr doc val . T.map toLower
