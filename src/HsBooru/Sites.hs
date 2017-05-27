@@ -88,7 +88,7 @@ gelbooru = SiteScraper{..}
           scrapePost = do
                 let post = "post"
                 siteID   <- attrRead "id" post
-                uploader <- attrRead "creator_id" post
+                uploader <- attrRead "creator_id" post <|> pure 0
                 score    <- attrRead "score" post
                 tags     <- attrText "tags" post <&> T.words
                 fileURL  <- ("http:" <>) <$> attrText "file_url" post

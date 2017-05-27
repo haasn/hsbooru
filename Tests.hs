@@ -121,17 +121,22 @@ prop_retry ss = ioProperty . runBooruWith ss [] $ do
 
 -- ** gelbooru scraper
 
-gelbooruReal :: Server
-gelbooruReal = [
+gelbooruSrv :: Server
+gelbooruSrv = [
     ( "https://gelbooru.com/index.php?page=dapi&s=post&q=index&id=1"
     , "<?xml version=\"1.0\" encoding=\"UTF-8\"?><posts count=\"1\" offset=\"0\"><post height=\"600\" score=\"266\" file_url=\"//simg4.gelbooru.com/images/f3/82/f3824ad985f121187065c4eaeae22875.jpg\" parent_id=\"\" sample_url=\"//simg4.gelbooru.com/images/f3/82/f3824ad985f121187065c4eaeae22875.jpg\"  sample_width=\"400\" sample_height=\"600\" preview_url=\"//assets.gelbooru.com/thumbnails/f3/82/thumbnail_f3824ad985f121187065c4eaeae22875.jpg\" rating=\"s\" tags=\"1girl asahina_mikuru asahina_mikuru_(cosplay) breasts brown_hair cleavage corset cosplay dress female from_above get hairband lips long_hair looking_at_viewer lowres mikuru_beam mizuhara_arisa name_tag pantyhose photo sitting smile solo suzumiya_haruhi_no_yuuutsu v waitress wrist_cuffs\" id=\"1\" width=\"400\"  change=\"1495758432\" md5=\"f3824ad985f121187065c4eaeae22875\" creator_id=\"6498\" has_children=\"true\" created_at=\"Mon Jul 16 00:19:58 -0500 2007\" status=\"active\" source=\"\" has_notes=\"false\" has_comments=\"true\" preview_width=\"100\" preview_height=\"150\"/>"
+    ),
+
+    -- Invalid creator_id / created_at
+    ( "https://gelbooru.com/index.php?page=dapi&s=post&q=index&id=198602"
+    , "<?xml version=\"1.0\" encoding=\"UTF-8\"?><posts count=\"1\" offset=\"0\"><post score=\"1\" file_url=\"//assets.gelbooru.com/images/71/62/7162356ed0764b24f1318488a7e324ce.jpg\" rating=\"s\" tags=\" snip \" id=\"198602\" creator_id=\"\" created_at=\"Wed Dec 31 18:00:00 -0600 1969\" source=\"\" />"
     )
   ]
 
 
 case_gelbooru_real :: Assertion
 case_gelbooru_real = do
-    ctx <- testContext def gelbooruReal
+    ctx <- testContext def gelbooruSrv
     Right [p] <- runBooruM ctx . S.toList_ $ scrapeSite gelbooru (IS.singleton 1)
     p @?= PostSuccess
         { siteID   = 1
@@ -144,6 +149,23 @@ case_gelbooru_real = do
         , fileURL  = "http://simg4.gelbooru.com/images/f3/82/f3824ad985f121187065c4eaeae22875.jpg"
         , fileName = "f3824ad985f121187065c4eaeae22875.jpg"
         , tags     = ["1girl","asahina_mikuru","asahina_mikuru_(cosplay)","breasts","brown_hair","cleavage","corset","cosplay","dress","female","from_above","get","hairband","lips","long_hair","looking_at_viewer","lowres","mikuru_beam","mizuhara_arisa","name_tag","pantyhose","photo","sitting","smile","solo","suzumiya_haruhi_no_yuuutsu","v","waitress","wrist_cuffs"]
+        }
+
+case_gelbooru_invalid :: Assertion
+case_gelbooru_invalid = do
+    ctx <- testContext def gelbooruSrv
+    Right [p] <- runBooruM ctx . S.toList_ $ scrapeSite gelbooru (IS.singleton 198602)
+    p @?= PostSuccess
+        { siteID   = 198602
+        , uploaded = UTCTime (fromGregorian 1970 01 01) (secondsToDiffTime 0)
+        , postSite = "gelbooru"
+        , rating   = Safe
+        , uploader = 0
+        , score    = 1
+        , source   = Nothing
+        , tags     = [ "snip" ]
+        , fileURL  = "http://assets.gelbooru.com/images/71/62/7162356ed0764b24f1318488a7e324ce.jpg"
+        , fileName = "7162356ed0764b24f1318488a7e324ce.jpg"
         }
 
 -- * HsBooru.Stats
