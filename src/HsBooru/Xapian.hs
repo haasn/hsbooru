@@ -4,6 +4,7 @@ module HsBooru.Xapian
     ( XapianM
     , XapianDB
     , localDB
+    , memoryDB
     , runXM
     , xapianStore
     , txBegin

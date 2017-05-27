@@ -1,8 +1,6 @@
 -- | Heavy lifting logic for scraping posts and downloading images
 module HsBooru.Scraper
-    ( URL
-    , fetch
-    , download
+    ( download
     , scrapeSite
     , downloadImage
     , storeImages
@@ -12,13 +10,12 @@ module HsBooru.Scraper
 import Prelude hiding (log)
 
 import Control.Exception (try)
-import qualified Data.Acid as A
+import Data.Acid (createCheckpoint)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.IntervalSet as IS
 import qualified Data.Text as T
 import qualified Streaming.Prelude as S
 
-import Network.HTTP.Types.Status
 import System.Directory (doesFileExist)
 import System.FilePath.Posix ((</>))
 import Streaming
@@ -30,21 +27,6 @@ import HsBooru.Xapian
 import HsBooru.Stats
 
 -- * Fetching and scraping
-
-type URL = String
-
--- | Fetch a URL and return its contents as a ByteString. Retries a number
--- of times according to retryCount
-fetch :: URL -> BooruM LBS.ByteString
-fetch url = ask >>= \Ctx{..} -> retry retryCount $ do
-    req <- io $ parseRequest url
-    res <- requireRight . tryHttp $ httpLbs req manager
-    let status = responseStatus res
-    unless (statusIsSuccessful status) $
-        throwB $ "Error downloading " ++ url ++ ": " ++ show status
-    return $ responseBody res
-  where tryHttp :: IO a -> IO (Either HttpException a)
-        tryHttp = try
 
 -- | Run a scraper on a website and range, returning a stream of Posts.
 scrapeSite :: SiteScraper -> PostSet -> Stream (Of Post) BooruM ()
@@ -70,15 +52,15 @@ applyFilter p = return p
 
 -- | Fetch a URL and save it to a file
 download :: URL -> FilePath -> BooruM ()
-download url path = fetch url >>= ioCatch . LBS.writeFile path
+download url path = asks fetchURL >>= ($ url) >>= ioCatch . LBS.writeFile path
 
 -- | Checks if an image is already downloaded, and downloads it if it isn't.
 requireImage :: FilePath -> URL -> BooruM ()
-requireImage fileName fileURL = do
-    Ctx{..} <- ask
-    let filePath = imageDir </> fileName
-    e <- ioCatch $ doesFileExist filePath
-    unless e $ download fileURL filePath
+requireImage fileName fileURL = asks imageDir >>= \case
+    Nothing  -> return ()
+    Just dir -> do let path = dir </> fileName
+                   e <- ioCatch $ doesFileExist path
+                   unless e $ download fileURL path
 
 -- | Attempt to download an image, transforming PostSuccess into PostFailure on
 -- failure
@@ -96,15 +78,15 @@ downloadImage p@PostSuccess{..} = tryDL `catchB` \reason -> return PostFailure{.
 storeBatch :: Timer -> Stream (Of Post) BooruM r -> BooruM r
 storeBatch t ps = do
     Ctx{..} <- ask
-    let update (!r, !s, a) p = ( postState p <> r
-                               , postStats p <> s
-                               , xapianStore xapianDB p >> a
-                               )
-    (rec, stats, storeAll) :> r <- S.fold update (mempty, mempty, return ()) id ps
+    let f (!r, !s, a) p = ( postState p <> r
+                          , postStats p <> s
+                          , xapianStore xapianDB p >> a
+                          )
+    (rec, stats, storeAll) :> r <- S.fold f (mempty, mempty, return ()) id ps
     -- Store them all in the xapian DB first, and only when this succeeds,
     -- the acid db
-    runXM $ txBegin xapianDB >> storeAll >> txCommit xapianDB
-    io . A.update acidDB $ UpdateSites rec
+    runXM  $ txBegin xapianDB >> storeAll >> txCommit xapianDB
+    update $ UpdateSites rec
 
     dt <- io $ measureTimer t
     io.log "db" $ showPostStats stats ++ " => " ++ showPerf (postCount rec) dt
@@ -132,7 +114,7 @@ inspectPost p = ask >>= \Ctx{..} -> io $ case p of
 processSite :: SiteScraper -> BooruM ()
 processSite s@SiteScraper{..} = do
     Ctx{..}   <- ask
-    siteState <- io $ A.query acidDB (GetSite siteName)
+    siteState <- query $ GetSite siteName
     siteRange <- idRange
 
     let known   = scrapedMap siteState
@@ -158,7 +140,7 @@ processSite s@SiteScraper{..} = do
 
     -- Downstream
     storeImages $ streamInput inp
-    ioCatch $ A.createCheckpoint acidDB
+    ioCatch $ createCheckpoint acidDB
 
 
 -- ** Pipes <-> Streaming boilerplate

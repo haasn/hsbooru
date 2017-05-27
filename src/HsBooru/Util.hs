@@ -7,7 +7,6 @@ module HsBooru.Util
     , (<&>)
     , io
     , ioCatch
-    , retry
     ) where
 
 import Prelude hiding (log)
@@ -70,8 +69,3 @@ ioCatch act = ioEither $ try act <&> lmap (show :: IOException -> String)
 lmap :: (a -> b) -> Either a x -> Either b x
 lmap f (Left  x) = Left (f x)
 lmap _ (Right x) = Right x
-
--- | When used with ExceptT, this retries an action multiple times
-retry :: Int -> BooruM a -> BooruM a
-retry 1 a = a
-retry n a = a `catchB` (\_ -> retry (n-1) a)

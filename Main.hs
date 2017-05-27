@@ -17,7 +17,7 @@ import qualified Data.Acid as A
 import HsBooru.Scraper
 import HsBooru.Sites
 import HsBooru.Stats
-import HsBooru.Types
+import HsBooru.Types hiding (update)
 import HsBooru.Util
 import HsBooru.Xapian
 
@@ -47,9 +47,9 @@ runScraper :: [SiteScraper] -> GlobalConf -> InternalDB -> IO ()
 runScraper sites Conf{..} acidDB = do
     -- Generate context
     let xapianDir = dbDir </> "xapian"
-        imageDir  = fromMaybe (dbDir </> "images") optImageDir
+        imageDir  = Just $ fromMaybe (dbDir </> "images") optImageDir
 
-    createDirectoryIfMissing True imageDir
+    forM_ imageDir $ createDirectoryIfMissing True
     xapianDB <- either error id <$> localDB xapianDir
 
     -- Spawn enough threads to make each capability have about ~parCount open
@@ -59,7 +59,7 @@ runScraper sites Conf{..} acidDB = do
         Just jobs -> jobs  <$  setNumCapabilities jobs
 
     let threadCount = capCount * parCount
-    manager  <- spawnManager $ threadCount + 10
+    fetchURL <- fetchHTTP $ threadCount + 10
 
     -- Run scraper
     forM_ sites $ \site@SiteScraper{..} -> do

@@ -48,7 +48,7 @@ scrape :: URL -> Scraper LT.Text a -> BooruM a
 scrape url s = do
     Ctx{..} <- ask
     when verbose $ io.log "http" $ "Attempting to scrape " ++ url
-    body <- decodeUtf8 <$> fetch url
+    body <- decodeUtf8 <$> fetchURL url
     maybe (throwB "Scraper returned no results") return $
         scrapeStringLike body s
 

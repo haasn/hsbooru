@@ -1,18 +1,29 @@
-{-# LANGUAGE TemplateHaskell, NoMonomorphismRestriction #-}
+{-# LANGUAGE TemplateHaskell, NoMonomorphismRestriction, OverloadedStrings #-}
 module Main where
 
 import Test.Framework
 import Test.Framework.TH.Prime
 import Test.Framework.Providers.QuickCheck2
-import Test.QuickCheck
+import Test.Framework.Providers.HUnit
+import Test.QuickCheck hiding (verbose)
+import Test.HUnit
 
-import qualified Data.Acid.Memory.Pure as A
+import Data.Time
+
+import qualified Data.Acid as A
+import qualified Data.Acid.Memory as A
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.IntervalSet as IS
-import qualified Data.Set as S
+import qualified Data.Set as Set
 import qualified Data.Map as M
+import qualified Streaming.Prelude as S
 
 import HsBooru.Types
+import HsBooru.Scraper
+import HsBooru.Sites
 import HsBooru.Stats
+import HsBooru.Util
+import HsBooru.Xapian
 
 main = $(defaultMainGenerator)
 
@@ -60,20 +71,80 @@ instance Arbitrary ScraperState where
     arbitrary = ScraperState <$> arbitrary
     shrink (ScraperState m) = ScraperState <$> shrink m
 
--- mock database
-memDB  = A.openAcidState
-query  = flip A.query
-update = flip A.update_
+-- ** Mock context
 
-touchSite s = UpdateSites . postState $ PostDeleted { siteID = 1, postSite = s }
+type Server = [(URL, LBS.ByteString)]
 
-prop_all_sites sites = sites == S.fromList sites'
-    where sites' = query ActiveSites $ foldr update (memDB def) events
-          events = map touchSite $ S.toList sites
+testContext :: ScraperState -> Server -> IO Context
+testContext init srv = do
+    xpDB <- either error id <$> memoryDB
+    stDB <- A.openMemoryState init
+    return Ctx { xapianDB    = xpDB
+               , acidDB      = stDB
+               , imageDir    = Nothing
+               , fetchURL    = fakeFetch srv
+               , retryCount  = 1
+               , batchSize   = 1
+               , threadCount = 1
+               , minTagCount = 0
+               , verbose     = False
+               }
 
-prop_retry ss = all IS.null [ deletedMap $ query (GetSite s) st | s <- sites ]
-    where sites = M.keys $ scraperState ss
-          st = foldr (update . RetrySite) (memDB ss) sites
+fakeFetch :: Server -> URL -> BooruM LBS.ByteString
+fakeFetch srv url = case find (\(u, _) -> u == url) srv of
+    Just (_, res) -> return res
+    Nothing       -> throwB "URL not found in testContext!"
+
+runBooruWith :: ScraperState -> Server -> BooruM a -> IO a
+runBooruWith init srv act = do
+    ctx <- testContext init srv
+    either error id <$> runBooruM ctx act
+
+-- ** Some mock database tests
+
+touchSite :: String -> BooruM ()
+touchSite s = update $ UpdateSites ss
+    where ss = postState $ PostDeleted { siteID = 1, postSite = s }
+
+prop_all_sites sites = ioProperty . runBooruWith def [] $ do
+    mapM_ touchSite $ Set.toList sites
+    sites' <- Set.fromList <$> query ActiveSites
+    return $ sites == sites'
+
+prop_retry ss = ioProperty . runBooruWith ss [] $ do
+    let sites = M.keys $ scraperState ss
+    mapM_ (update . RetrySite) sites
+    res <- sequence [ query (GetSite s) | s <- sites ]
+    return $ all (IS.null . deletedMap) res
+
+-- * HsBooru.Scraper
+
+-- ** gelbooru scraper
+
+gelbooruReal :: Server
+gelbooruReal = [
+    ( "https://gelbooru.com/index.php?page=dapi&s=post&q=index&id=1"
+    , "<?xml version=\"1.0\" encoding=\"UTF-8\"?><posts count=\"1\" offset=\"0\"><post height=\"600\" score=\"266\" file_url=\"//simg4.gelbooru.com/images/f3/82/f3824ad985f121187065c4eaeae22875.jpg\" parent_id=\"\" sample_url=\"//simg4.gelbooru.com/images/f3/82/f3824ad985f121187065c4eaeae22875.jpg\"  sample_width=\"400\" sample_height=\"600\" preview_url=\"//assets.gelbooru.com/thumbnails/f3/82/thumbnail_f3824ad985f121187065c4eaeae22875.jpg\" rating=\"s\" tags=\"1girl asahina_mikuru asahina_mikuru_(cosplay) breasts brown_hair cleavage corset cosplay dress female from_above get hairband lips long_hair looking_at_viewer lowres mikuru_beam mizuhara_arisa name_tag pantyhose photo sitting smile solo suzumiya_haruhi_no_yuuutsu v waitress wrist_cuffs\" id=\"1\" width=\"400\"  change=\"1495758432\" md5=\"f3824ad985f121187065c4eaeae22875\" creator_id=\"6498\" has_children=\"true\" created_at=\"Mon Jul 16 00:19:58 -0500 2007\" status=\"active\" source=\"\" has_notes=\"false\" has_comments=\"true\" preview_width=\"100\" preview_height=\"150\"/>"
+    )
+  ]
+
+
+case_gelbooru_real :: Assertion
+case_gelbooru_real = do
+    ctx <- testContext def gelbooruReal
+    Right [p] <- runBooruM ctx . S.toList_ $ scrapeSite gelbooru (IS.singleton 1)
+    p @?= PostSuccess
+        { siteID   = 1
+        , uploaded = UTCTime (fromGregorian 2007 07 16) (secondsToDiffTime 19198)
+        , postSite = "gelbooru"
+        , rating   = Safe
+        , uploader = 6498
+        , score    = 266
+        , source   = Nothing
+        , fileURL  = "http://simg4.gelbooru.com/images/f3/82/f3824ad985f121187065c4eaeae22875.jpg"
+        , fileName = "f3824ad985f121187065c4eaeae22875.jpg"
+        , tags     = ["1girl","asahina_mikuru","asahina_mikuru_(cosplay)","breasts","brown_hair","cleavage","corset","cosplay","dress","female","from_above","get","hairband","lips","long_hair","looking_at_viewer","lowres","mikuru_beam","mizuhara_arisa","name_tag","pantyhose","photo","sitting","smile","solo","suzumiya_haruhi_no_yuuutsu","v","waitress","wrist_cuffs"]
+        }
 
 -- * HsBooru.Stats
 

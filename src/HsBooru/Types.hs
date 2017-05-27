@@ -18,7 +18,8 @@ module HsBooru.Types (
 
     -- * Main types
     , Context(..)
-    , spawnManager
+    , URL
+    , fetchHTTP
     , BooruM(BooruM)
     , runBooruM
     , ioEither
@@ -48,10 +49,12 @@ module HsBooru.Types (
     , UpdateSites(..)
     , RetrySite(..)
     , withAcid
+    , query
+    , update
     ) where
 
 import Control.Applicative
-import Control.Exception (bracket)
+import Control.Exception (try, bracket)
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
@@ -69,11 +72,13 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
+import Network.HTTP.Types.Status
 import System.FilePath
 
 import qualified Data.Acid as A
 import qualified Data.IntervalSet as IS
 import qualified Data.Map as M
+import qualified Data.ByteString.Lazy as LBS
 
 import HsBooru.Xapian.FFI (XapianDB)
 
@@ -191,8 +196,8 @@ A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite, 'updateSites, 
 data Context = Ctx
     { xapianDB    :: !XapianDB
     , acidDB      :: !InternalDB
-    , imageDir    :: !FilePath
-    , manager     :: !Manager
+    , imageDir    :: Maybe FilePath
+    , fetchURL    :: URL -> BooruM LBS.ByteString
     , retryCount  :: !Int
     , batchSize   :: !Int
     , threadCount :: !Int
@@ -200,8 +205,30 @@ data Context = Ctx
     , verbose     :: !Bool
     }
 
-spawnManager :: Int -> IO Manager
-spawnManager n = newManager $ tlsManagerSettings { managerConnCount = n }
+type URL = String
+
+fetchHTTP :: Int -> IO (URL -> BooruM LBS.ByteString)
+fetchHTTP n = fetch <$> newManager tlsManagerSettings { managerConnCount = n }
+
+-- | Fetch a URL and return its contents as a ByteString. Retries a number
+-- of times according to retryCount
+fetch :: Manager -> URL -> BooruM LBS.ByteString
+fetch mgr url = ask >>= \Ctx{..} -> retry retryCount $ do
+    req <- liftIO $ parseRequest url
+    res <- tryHttp $ httpLbs req mgr
+    let status = responseStatus res
+    unless (statusIsSuccessful status) $
+        throwB $ "Error downloading " ++ url ++ ": " ++ show status
+    return $ responseBody res
+  where tryHttp act = do
+            res <- liftIO $ try act
+            case res of
+                Left e  -> throwB $ show (e :: HttpException)
+                Right r -> return r
+
+        retry 1 a = a
+        retry n a = a `catchB` (\_ -> retry (n-1) a)
+
 
 -- | Internal monad for early termination and configuration
 newtype BooruM a = BooruM { runBooruM_ :: ExceptT String (ReaderT Context IO) a }
@@ -242,10 +269,10 @@ data Post
     -- | Post scrape was successful but the file was confirmed to be deleted
     | PostDeleted { siteID   :: !Int
                   , postSite :: !String }
-    deriving Show
+    deriving (Eq, Show)
 
 data Rating = Safe | Questionable | Explicit
-    deriving (Show, Read)
+    deriving (Eq, Show, Read)
 
 postState :: Post -> ScraperState
 postState PostFailure{..} = def
@@ -267,3 +294,13 @@ type InternalDB = A.AcidState ScraperState
 withAcid :: FilePath -> (InternalDB -> IO a) -> IO a
 withAcid dbDir = bracket (A.openLocalStateFrom acidDir def) A.closeAcidState
     where acidDir = dbDir </> "acid"
+
+query :: A.EventState ev ~ ScraperState
+      => A.QueryEvent ev => ev -> BooruM (A.EventResult ev)
+query q = asks acidDB >>= \st ->
+    liftIO $ A.query st q
+
+update :: A.EventState ev ~ ScraperState
+       => A.UpdateEvent ev => ev -> BooruM (A.EventResult ev)
+update u = asks acidDB >>= \st ->
+    liftIO $ A.update st u
