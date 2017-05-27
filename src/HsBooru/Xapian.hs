@@ -59,7 +59,7 @@ addTag db doc prefix (T.map toLower -> tag) = do
         fullTag     = prefix <> tag
 
     addTerm doc $ fullTag
-    unless (safeTag == fullTag) $
+    unless (safeTag == fullTag || T.null safeTag) $
         addSynonym db safeTag fullTag
 
 strVal :: Document -> ValueNumber -> Text -> XapianM ()
