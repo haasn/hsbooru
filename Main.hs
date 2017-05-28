@@ -13,6 +13,7 @@ import System.Directory (createDirectoryIfMissing)
 import System.FilePath
 
 import qualified Data.Acid as A
+import qualified Data.Text as T
 
 import HsBooru.Scraper
 import HsBooru.Sites
@@ -29,6 +30,8 @@ data GlobalConf = Conf
     , optCapCount :: Maybe Int
     , retryCount  :: Int
     , minTagCount :: Int
+    , blackList   :: [Text]
+    , whiteList   :: [Text]
     , verbose     :: Bool
     }
 
@@ -143,8 +146,8 @@ parseGlobalOpts = Conf
     )
 
   <*> option auto
-    ( long "batchsize"
-   <> short 'b'
+    ( long "batchSize"
+   <> short 'B'
    <> metavar "N"
    <> showDefault
    <> value 1000
@@ -189,7 +192,22 @@ parseGlobalOpts = Conf
    <> metavar "N"
    <> showDefault
    <> value 0
-   <> help ("Only store posts with this many tags or more.")
+   <> help ("Skip posts with fewer tags than this. They will be retried \
+            \automatically")
+    )
+
+  <*> (many . fmap T.pack . strOption)
+    ( long "blackList"
+   <> short 'b'
+   <> metavar "TAG"
+   <> help ("Delete posts with any of these tags.")
+    )
+
+  <*> (many . fmap T.pack . strOption)
+    ( long "whiteList"
+   <> short 'w'
+   <> metavar "TAG"
+   <> help ("Delete posts without at least one of these tags.")
     )
 
   <*> switch

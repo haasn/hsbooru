@@ -41,10 +41,21 @@ scrapeSite SiteScraper{..} = go where
         \reason -> return PostFailure{postSite = siteName, ..}
 
 applyFilter :: Post -> BooruM Post
-applyFilter p@PostSuccess{..} = do
+applyFilter p@PostSuccess{..} = withReturn $ \ret -> do
     Ctx{..} <- ask
-    when (length tags < minTagCount) $ throwB "Post has too few tags"
+    -- When a post doesn't have enough tags, treat it as a failure - i.e. we
+    -- will try scraping it again implicitly
+    when (length tags < minTagCount) $
+        lift $ throwB "Post has too few tags"
+
+    -- When a post is white/blacklisted, treat it as a permanent failure -
+    -- i.e. we won't try rescraping it until the user requests it
+    when (tags `intersects` blackList) $ ret PostDeleted{..}
+    unless (null whiteList || tags `intersects` whiteList) $ ret PostDeleted{..}
+
     return p
+
+  where intersects a b = not . null $ a `intersect` b
 
 applyFilter p = return p
 

@@ -237,6 +237,8 @@ data Context = Ctx
     , batchSize   :: Int
     , threadCount :: Int
     , minTagCount :: Int
+    , blackList   :: [Text]
+    , whiteList   :: [Text]
     , verbose     :: Bool
     }
 

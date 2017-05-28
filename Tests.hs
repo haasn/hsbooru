@@ -87,6 +87,8 @@ testContext init srv = do
                , batchSize   = 1
                , threadCount = 1
                , minTagCount = 0
+               , blackList   = []
+               , whiteList   = []
                , verbose     = False
                }
 
@@ -133,6 +135,9 @@ gelbooruSrv = [
     )
   ]
 
+gelbooruPosts :: IntSet
+gelbooruPosts = IS.fromList [1, 198602]
+
 
 case_gelbooru_real :: Assertion
 case_gelbooru_real = do
@@ -167,6 +172,30 @@ case_gelbooru_invalid = do
         , fileURL  = "http://assets.gelbooru.com/images/71/62/7162356ed0764b24f1318488a7e324ce.jpg"
         , fileName = "7162356ed0764b24f1318488a7e324ce.jpg"
         }
+
+case_filter_tags :: Assertion
+case_filter_tags = do
+    ctx' <- testContext def gelbooruSrv
+    let ctx = ctx' { minTagCount = 10 }
+    Right ps <- runBooruM ctx . S.toList_ $ scrapeSite gelbooru gelbooruPosts
+    assertBool "results have enough tags" $
+        all (> 10) [ length ts | PostSuccess{ tags = ts } <- ps ]
+
+case_filter_white :: Assertion
+case_filter_white = do
+    ctx' <- testContext def gelbooruSrv
+    let ctx = ctx' { whiteList = ["1girl"] }
+    Right ps <- runBooruM ctx . S.toList_ $ scrapeSite gelbooru gelbooruPosts
+    assertBool "results all have tag" $
+        all ("1girl" `elem`) [ ts | PostSuccess{ tags = ts } <- ps ]
+
+case_filter_black :: Assertion
+case_filter_black = do
+    ctx' <- testContext def gelbooruSrv
+    let ctx = ctx' { blackList = ["photo"] }
+    Right ps <- runBooruM ctx . S.toList_ $ scrapeSite gelbooru gelbooruPosts
+    assertBool "results don't contain tag" . not $
+        any ("photo" `elem`) [ ts | PostSuccess{ tags = ts } <- ps ]
 
 -- * HsBooru.Stats
 

@@ -84,6 +84,7 @@ executable hsbooru
                      , directory >=1.2
                      , acid-state >=0.14
                      , optparse-applicative >=0.13
+                     , text >=1.2
 
 test-suite hsbooru-tests
   type:                exitcode-stdio-1.0

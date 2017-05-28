@@ -70,13 +70,14 @@ copy/paste it:
 ```
 hsbooru - a haskell *booru scraper using xapian
 
-Usage: hsbooru COMMAND (-d|--dbDir DIR) [-i|--imageDir DIR] [-b|--batchsize N] [-p|--parallelism N]
-               [-j|--jobs N] [-r|--retryCount N] [-m|--minTags N] [-v|--verbose]
+Usage: hsbooru COMMAND (-d|--dbDir DIR) [-i|--imageDir DIR] [-B|--batchSize N] [-p|--parallelism N]
+               [-j|--jobs N] [-r|--retryCount N] [-m|--minTags N] [-b|--blackList TAG]..
+               [-w|--whiteList TAG].. [-v|--verbose]
 
 Available options:
   -d,--dbDir DIR           Database directory
   -i,--imageDir DIR        Directory to store images in. Defaults to `<dbDir>/images`.
-  -b,--batchsize N         How many posts to fetch before committing them all to the database. Since
+  -B,--batchSize N         How many posts to fetch before committing them all to the database. Since
                            this is a synchronous operation, using a lower value reduces throughput;
                            but using a too high value can create long stalls in the
                            mailbox. (default: 1000)
@@ -87,7 +88,10 @@ Available options:
                            CPU cores, but no more than 4. Going too high can be slower, if the
                            server decides to rate limit.
   -r,--retryCount N        How often to retry each network request before giving up. (default: 3)
-  -m,--minTags N           Only store posts with this many tags or more. (default: 0)
+  -m,--minTags N           Skip posts with fewer tags than this. They will be retried
+                           automatically (default: 0)
+  -b,--blackList TAG..     Delete posts with any of these tags.
+  -w,--whiteList TAG..     Delete posts without at least one of these tags.
   -v,--verbose             Print data about every URL and post. Can be slow!
   -h,--help                Show this help text
 
@@ -108,3 +112,10 @@ scraper failure (e.g. network/server) and a post acutally being confirmed as
 missing. But maybe a post got deleted and then un-deleted or something. Fuck
 knows how these mods work. Or maybe something else went wrong. Anyway, this
 command allows you to retry all posts we've already marked as "deleted".
+
+Furthermore, the `retry` command allows you to re-scrape posts that were
+deleted due to the effects of filters (`--blackList` or `--whiteList`). It's
+worth pointing out that unlike `--blackList`/`--whiteList`, the `--minTags`
+option only temporarily skips posts. It's intended as a "wait until posts are
+sufficiently tagged before scraping" option; whereas the *lists are meant as
+"we never want these posts" option.

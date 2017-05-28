@@ -7,6 +7,7 @@ module HsBooru.Util
     , (<&>)
     , io
     , ioCatch
+    , withReturn
     ) where
 
 import Prelude hiding (log)
@@ -16,6 +17,7 @@ import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
+import Control.Monad.Trans.Cont
 
 import Data.Time (getZonedTime)
 import System.IO
@@ -69,3 +71,6 @@ ioCatch act = ioEither $ try act <&> lmap (show :: IOException -> String)
 lmap :: (a -> b) -> Either a x -> Either b x
 lmap f (Left  x) = Left (f x)
 lmap _ (Right x) = Right x
+
+withReturn :: Monad m => ((r -> ContT r m b) -> ContT r m r) -> m r
+withReturn = evalContT . callCC
