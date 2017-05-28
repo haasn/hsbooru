@@ -38,7 +38,7 @@ scrapeSite SiteScraper{..} = go where
         go $ IS.delete id posts
 
     tryScrape siteID = (scrapeID siteID >>= applyFilter) `catchB`
-        \reason -> return PostFailure{postSite = siteName, ..}
+        \Err{..} -> return PostFailure{postSite = siteName, reason = errMsg, ..}
 
 applyFilter :: Post -> BooruM Post
 applyFilter p@PostSuccess{..} = withReturn $ \ret -> do
@@ -78,7 +78,8 @@ requireImage fileName fileURL = asks imageDir >>= \case
 downloadImage :: Post -> BooruM Post
 downloadImage p@PostDeleted{}   = return p
 downloadImage p@PostFailure{}   = return p
-downloadImage p@PostSuccess{..} = tryDL `catchB` \reason -> return PostFailure{..}
+downloadImage p@PostSuccess{..} = tryDL `catchB` \Err{..} -> return
+                                    PostFailure{ reason = errMsg, ..}
     where tryDL = p <$ requireImage (T.unpack fileName) (T.unpack fileURL)
 
 

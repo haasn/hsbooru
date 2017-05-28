@@ -67,9 +67,7 @@ runScraper sites Conf{..} acidDB = do
     -- Run scraper
     forM_ sites $ \site@SiteScraper{..} -> do
         res <- runBooruM Ctx{..} $ processSite site
-        case res of
-            Left e  -> logError siteName e
-            Right _ -> return ()
+        either (logError siteName . show) return res
 
     A.createArchive acidDB
     log "general" "Done scraping."

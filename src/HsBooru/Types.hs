@@ -15,12 +15,15 @@ module HsBooru.Types (
     , module Data.Time
     , module Network.HTTP.Client
     , module System.FilePath
+    , HasCallStack
 
     -- * Main types
     , Context(..)
     , URL
     , fetchHTTP
     , BooruM(BooruM)
+    , Err(..)
+    , err
     , runBooruM
     , ioEither
     , throwB
@@ -76,6 +79,7 @@ import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status
 import System.FilePath
+import GHC.Stack
 
 import qualified Data.Acid as A
 import qualified Data.IntervalSet as IS
@@ -268,22 +272,30 @@ fetch mgr url = ask >>= \Ctx{..} -> retry retryCount $ do
 
 
 -- | Internal monad for early termination and configuration
-newtype BooruM a = BooruM { runBooruM_ :: ExceptT String (ReaderT Context IO) a }
+newtype BooruM a = BooruM { runBooruM_ :: ExceptT Err (ReaderT Context IO) a }
     deriving (Functor, Applicative, Monad, MonadIO, MonadReader Context)
 
-ioEither :: IO (Either String a) -> BooruM a
-ioEither = BooruM . ExceptT . lift
+data Err = Err { errMsg :: String, errLoc :: CallStack }
 
-runBooruM :: Context -> BooruM a -> IO (Either String a)
+instance Show Err where
+    show Err{..} = unlines [ "Error: " ++ errMsg, prettyCallStack errLoc ]
+
+err :: HasCallStack => String -> Err
+err errMsg = Err { errLoc = callStack, .. }
+
+ioEither :: HasCallStack => IO (Either String a) -> BooruM a
+ioEither = either throwB pure <=< liftIO
+
+runBooruM :: Context -> BooruM a -> IO (Either Err a)
 runBooruM ctx = flip runReaderT ctx . runExceptT . runBooruM_
 
-throwB :: String -> BooruM a
-throwB = BooruM . throwE
+throwB :: HasCallStack => String -> BooruM a
+throwB = BooruM . throwE . err
 
-catchB :: BooruM a -> (String -> BooruM a) -> BooruM a
+catchB :: BooruM a -> (Err -> BooruM a) -> BooruM a
 catchB a h = BooruM $ runBooruM_ a `catchE` (runBooruM_ . h)
 
-lower :: BooruM a -> BooruM (IO (Either String a))
+lower :: BooruM a -> BooruM (IO (Either Err a))
 lower (BooruM et) = runReaderT (runExceptT et) <$> ask
 
 -- | A scraped post, including all metadata and status
