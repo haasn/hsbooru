@@ -26,7 +26,7 @@ import qualified Data.IntervalSet as IS
 
 import HsBooru.Types
 
-data PostStats = PostStats { good :: !Int, gone :: !Int, fail :: !Int }
+data PostStats = PostStats { good :: Int, gone :: Int, fail :: Int }
 instance Monoid PostStats where
     mempty = PostStats 0 0 0
     PostStats a b c `mappend` PostStats x y z = PostStats (a+x) (b+y) (c+z)

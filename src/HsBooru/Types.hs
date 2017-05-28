@@ -88,13 +88,13 @@ import HsBooru.Xapian.FFI (XapianDB)
 
 -- Invariant: successMap and failedMap are disjoint
 data SiteState_v0 = SiteState_v0
-    { successMap_v0 :: !IntSet
-    , failedMap_v0  :: !IntSet
+    { successMap_v0 :: IntSet
+    , failedMap_v0  :: IntSet
     }
 
 data SiteState_v1 = SiteState_v1
-    { scrapedMap_v1 :: !IntSet
-    , presentMap_v1 :: !IntSet
+    { scrapedMap_v1 :: IntSet
+    , presentMap_v1 :: IntSet
     }
 
 instance Migrate SiteState_v1 where
@@ -107,10 +107,10 @@ instance Migrate SiteState_v1 where
 -- the site's scraped / downloaded post range. Invariant: presentMap is a
 -- subset of scrapedMap
 data SiteState = SiteState
-    { scrapedMap :: !IntSet -- ^ Posts that were successfully scraped
-    , presentMap :: !IntSet -- ^ Posts that were successfully downloaded
-    , authorMap  :: !IntSet -- ^ Author IDs that we've heard about
-    , knownMap   :: !IntSet -- ^ Author IDs that we know
+    { scrapedMap :: IntSet -- ^ Posts that were successfully scraped
+    , presentMap :: IntSet -- ^ Posts that were successfully downloaded
+    , authorMap  :: IntSet -- ^ Author IDs that we've heard about
+    , knownMap   :: IntSet -- ^ Author IDs that we know
     } deriving (Show, Eq)
 
 instance Migrate SiteState where
@@ -229,15 +229,15 @@ A.makeAcidic ''ScraperState ['activeSites, 'getSite, 'updateSite, 'updateSites, 
 
 -- | Global context record
 data Context = Ctx
-    { xapianDB    :: !XapianDB
-    , acidDB      :: !InternalDB
+    { xapianDB    :: XapianDB
+    , acidDB      :: InternalDB
     , imageDir    :: Maybe FilePath
     , fetchURL    :: URL -> BooruM LBS.ByteString
-    , retryCount  :: !Int
-    , batchSize   :: !Int
-    , threadCount :: !Int
-    , minTagCount :: !Int
-    , verbose     :: !Bool
+    , retryCount  :: Int
+    , batchSize   :: Int
+    , threadCount :: Int
+    , minTagCount :: Int
+    , verbose     :: Bool
     }
 
 type URL = String
@@ -287,23 +287,23 @@ lower (BooruM et) = runReaderT (runExceptT et) <$> ask
 -- | A scraped post, including all metadata and status
 data Post
     -- | Post was successfully scraped
-    = PostSuccess { siteID   :: !Int
-                  , uploaded :: !UTCTime
-                  , postSite :: !String
-                  , rating   :: !Rating
-                  , uploader :: !Int
-                  , score    :: !Int
-                  , source   :: !(Maybe Text)
-                  , fileURL  :: !Text
-                  , fileName :: !Text
-                  , tags     :: ![Text] }
+    = PostSuccess { siteID   :: Int
+                  , uploaded :: UTCTime
+                  , postSite :: String
+                  , rating   :: Rating
+                  , uploader :: Int
+                  , score    :: Int
+                  , source   :: (Maybe Text)
+                  , fileURL  :: Text
+                  , fileName :: Text
+                  , tags     :: [Text] }
     -- | Post scrape was attempted and failed for some reason, included
-    | PostFailure { siteID   :: !Int
-                  , postSite :: !String
-                  , reason   :: !String }
+    | PostFailure { siteID   :: Int
+                  , postSite :: String
+                  , reason   :: String }
     -- | Post scrape was successful but the file was confirmed to be deleted
-    | PostDeleted { siteID   :: !Int
-                  , postSite :: !String }
+    | PostDeleted { siteID   :: Int
+                  , postSite :: String }
     deriving (Eq, Show)
 
 data Rating = Safe | Questionable | Explicit

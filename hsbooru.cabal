@@ -38,6 +38,7 @@ library
                      , LambdaCase
                      , BangPatterns
                      , ViewPatterns
+                     , StrictData
 
   other-extensions:    TemplateHaskell
                      , TypeFamilies
