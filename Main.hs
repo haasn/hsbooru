@@ -196,14 +196,14 @@ parseGlobalOpts = Conf
            \automatically"
     )
 
-  <*> (many . fmap T.pack . strOption)
+  <*> (fmap splitTags . many . strOption)
     ( long "blackList"
    <> short 'b'
    <> metavar "TAG"
    <> help "Delete posts with any of these tags."
     )
 
-  <*> (many . fmap T.pack . strOption)
+  <*> (fmap splitTags . many . strOption)
     ( long "whiteList"
    <> short 'w'
    <> metavar "TAG"
@@ -216,3 +216,6 @@ parseGlobalOpts = Conf
    <> showDefault
    <> help "Print data about every URL and post. Can be slow!"
     )
+
+  where splitTags :: [String] -> [Text]
+        splitTags = concatMap $ T.splitOn "," . T.pack
