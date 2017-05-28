@@ -142,7 +142,7 @@ parseGlobalOpts = Conf
     ( long "imageDir"
    <> short 'i'
    <> metavar "DIR"
-   <> help ("Directory to store images in. Defaults to `<dbDir>/images`.")
+   <> help "Directory to store images in. Defaults to `<dbDir>/images`."
     )
 
   <*> option auto
@@ -151,10 +151,10 @@ parseGlobalOpts = Conf
    <> metavar "N"
    <> showDefault
    <> value 1000
-   <> help ("How many posts to fetch before committing them all to the "++
-            "database. Since this is a synchronous operation, using a lower "++
-            "value reduces throughput; but using a too high value can "++
-            "create long stalls in the mailbox.")
+   <> help "How many posts to fetch before committing them all to the \
+           \database. Since this is a synchronous operation, using a lower \
+           \value reduces throughput; but using a too high value can \
+           \create long stalls in the mailbox."
     )
 
   <*> option auto
@@ -163,18 +163,18 @@ parseGlobalOpts = Conf
    <> metavar "N"
    <> showDefault
    <> value 2
-   <> help ("How many in-flight requests to maintain per thread. Increasing "++
-            "this can improve throughput but going too high risks running "++
-            "into network errors as the site kills connections.")
+   <> help "How many in-flight requests to maintain per thread. Increasing \
+           \this can improve throughput but going too high risks running \
+           \into network errors as the site kills connections."
     )
 
   <*> (optional.option auto)
     ( long "jobs"
    <> short 'j'
    <> metavar "N"
-   <> help ("How many threads to scrape from in parallel. Defaults to the "++
-            "of detected CPU cores, but no more than 4. Going too high can "++
-            "be slower, if the server decides to rate limit.")
+   <> help "How many threads to scrape from in parallel. Defaults to the \
+           \of detected CPU cores, but no more than 4. Going too high can \
+           \be slower, if the server decides to rate limit."
     )
 
   <*> option auto
@@ -183,7 +183,7 @@ parseGlobalOpts = Conf
    <> metavar "N"
    <> showDefault
    <> value 3
-   <> help ("How often to retry each network request before giving up.")
+   <> help "How often to retry each network request before giving up."
     )
 
   <*> option auto
@@ -192,27 +192,27 @@ parseGlobalOpts = Conf
    <> metavar "N"
    <> showDefault
    <> value 0
-   <> help ("Skip posts with fewer tags than this. They will be retried \
-            \automatically")
+   <> help "Skip posts with fewer tags than this. They will be retried \
+           \automatically"
     )
 
   <*> (many . fmap T.pack . strOption)
     ( long "blackList"
    <> short 'b'
    <> metavar "TAG"
-   <> help ("Delete posts with any of these tags.")
+   <> help "Delete posts with any of these tags."
     )
 
   <*> (many . fmap T.pack . strOption)
     ( long "whiteList"
    <> short 'w'
    <> metavar "TAG"
-   <> help ("Delete posts without at least one of these tags.")
+   <> help "Delete posts without at least one of these tags."
     )
 
   <*> switch
     ( long "verbose"
    <> short 'v'
    <> showDefault
-   <> help ("Print data about every URL and post. Can be slow!")
+   <> help "Print data about every URL and post. Can be slow!"
     )
