@@ -9,8 +9,6 @@ module HsBooru.Sites
 
 import Prelude hiding (log)
 
-import Data.Char (isNumber)
-import Data.Text (Text)
 import Data.Text.Lazy.Encoding (decodeUtf8)
 import Data.Time.Format
 
@@ -22,15 +20,10 @@ import qualified Data.IntervalSet as IS
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as LT
 
-import HsBooru.Scraper
 import HsBooru.Types
 import HsBooru.Util
 
 -- Helper functions
-
--- | Drops all non-numerics and then tries to read what's left as a number
-extractID :: URL -> Maybe Int
-extractID = readMaybe . dropWhile (not . isNumber)
 
 -- | Tries reading the contents of an attribute as an arbitrary Read type
 attrRead :: Read a => String -> Selector -> Scraper LT.Text a
@@ -92,10 +85,11 @@ gelbooru = SiteScraper{..}
                 score    <- attrRead "score" post
                 tags     <- attrText "tags" post <&> T.words
                 fileURL  <- ("http:" <>) <$> attrText "file_url" post
-                rating   <- attr "rating" post <&> \case
-                                "s" -> Safe
-                                "q" -> Questionable
-                                "e" -> Explicit
+                rating   <- attr "rating" post >>= \case
+                                "s" -> pure Safe
+                                "q" -> pure Questionable
+                                "e" -> pure Explicit
+                                _   -> fail "Failed parsing rating"
                 source   <- attr "source" post <&> \case
                                 ""  -> Nothing
                                 src -> Just (LT.toStrict src)

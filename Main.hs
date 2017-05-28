@@ -8,7 +8,6 @@ import Options.Applicative
 
 import GHC.Conc (getNumProcessors)
 import Control.Concurrent
-import System.Environment (getArgs)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath
 
@@ -39,8 +38,8 @@ type Command = GlobalConf -> IO ()
 
 siteOpt :: Parser SiteScraper
 siteOpt = argument readSite $ metavar "SITE" <> help "booru name"
-    where readSite = maybeReader findSite <|> readerError err
-          err = "Invalid site name. Currently supported sites: "
+    where readSite = maybeReader findSite <|> readerError msg
+          msg = "Invalid site name. Currently supported sites: "
              ++ unwords (map siteName scrapers)
 
 siteNameOpt :: Parser String

@@ -141,7 +141,6 @@ word_size_in_bytes = WORD_SIZE_IN_BITS `div` 8
 isStats :: IntSet -> IO ()
 isStats s = do
   let actualSize = fromIntegral $ leafCount s
-      idealSize  = 2 ** avgDepth s
       idealDepth = logBase 2 actualSize
 
   printf "Bin count:             %d\n"     $ binCount s

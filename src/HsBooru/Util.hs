@@ -12,9 +12,7 @@ import Prelude hiding (log)
 
 import Control.Exception
 import Control.Concurrent.MVar
-import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Class
 import Control.Monad.Trans.Cont
 
 import Data.Time (getZonedTime)

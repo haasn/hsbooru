@@ -328,6 +328,7 @@ postState PostFailure{..} = def
 postState post = ScraperState . M.singleton (postSite post) $ case post of
     PostDeleted{..} -> deletedState siteID
     PostSuccess{..} -> successState siteID uploader
+    _ -> def
 
 -- | A site-specific scraper definition
 data SiteScraper = SiteScraper

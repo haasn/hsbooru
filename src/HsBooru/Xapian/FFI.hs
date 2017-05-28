@@ -36,7 +36,7 @@ import System.IO.Unsafe (unsafePerformIO)
 
 -- | Xapian calls are hidden behind a newtype because access to xapian
 -- is not thread safe. This allows the library to ensure correct locking.
-newtype XapianM a = XapianM { runXapianM :: ExceptT String IO a }
+newtype XapianM a = XapianM (ExceptT String IO a)
     deriving (Functor, Applicative, Monad, MonadIO)
 
 runXM_ :: XapianM a -> IO (Either String a)

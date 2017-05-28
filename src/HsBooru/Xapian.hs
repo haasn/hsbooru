@@ -12,19 +12,13 @@ module HsBooru.Xapian
     , sanitizeTag
     ) where
 
-import Control.Concurrent.MVar
-import Control.Exception (bracket)
 import Data.Char
 import Data.Foldable
 import Data.Time.Clock.POSIX
-
-import System.IO.Unsafe (unsafePerformIO)
 import System.FilePath.Posix (takeExtension)
-import qualified Data.ByteString.UTF8 as UTF8
 import qualified Data.Text as T
 
 import HsBooru.Types
-import HsBooru.Util
 import HsBooru.Xapian.FFI
 
 runXM :: XapianM a -> BooruM a
