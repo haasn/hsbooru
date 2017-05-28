@@ -110,7 +110,7 @@ wrapError badVal action good = do
     err <- ContT alloca
     res <- liftIO $ action err
     liftIO $ if res == badVal
-        then Left  <$> (peekCString =<< peek err)
+        then peek err >>= (\e -> Left <$> peekCString e <* free e)
         else Right <$> good res
 
 foreign import ccall unsafe "db_open"

@@ -1,4 +1,5 @@
 #include <xapian.h>
+#include <string.h>
 
 extern "C" {
 
@@ -42,7 +43,7 @@ Xapian::WritableDatabase * db_open(const char *path, int flags,
         db = new Xapian::WritableDatabase(std::string(path), flags);
         return db;
     } catch (const Xapian::Error &e) {
-        *error = e.get_msg().c_str();
+        *error = strdup(e.get_msg().c_str());
         delete db;
         return NULL;
     }
@@ -59,7 +60,7 @@ unsigned int db_add_doc(Xapian::WritableDatabase *db, Xapian::Document *doc,
     try {
         return db->add_document(*doc);
     } catch (const Xapian::Error &e) {
-        *error = e.get_msg().c_str();
+        *error = strdup(e.get_msg().c_str());
         return 0;
     }
 }
@@ -73,7 +74,7 @@ unsigned int db_add_synonym(Xapian::WritableDatabase *db,
         db->add_synonym(std::string(tag1, len1), std::string(tag2, len2));
         return 1;
     } catch (const Xapian::Error &e) {
-        *error = e.get_msg().c_str();
+        *error = strdup(e.get_msg().c_str());
         return 0;
     }
 }
@@ -84,7 +85,7 @@ unsigned int db_tx_begin(Xapian::WritableDatabase *db, const char **error)
         db->begin_transaction();
         return 1;
     } catch (const Xapian::Error &e) {
-        *error = e.get_msg().c_str();
+        *error = strdup(e.get_msg().c_str());
         return 0;
     }
 }
@@ -95,7 +96,7 @@ unsigned int db_tx_commit(Xapian::WritableDatabase *db, const char **error)
         db->commit_transaction();
         return 1;
     } catch (const Xapian::Error &e) {
-        *error = e.get_msg().c_str();
+        *error = strdup(e.get_msg().c_str());
         return 0;
     }
 }
