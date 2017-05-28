@@ -9,7 +9,6 @@ module HsBooru.Scraper
 
 import Prelude hiding (log)
 
-import Control.Exception (try)
 import Data.Acid (createCheckpoint)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.IntervalSet as IS
@@ -33,9 +32,9 @@ scrapeSite :: SiteScraper -> IntSet -> Stream (Of Post) BooruM ()
 scrapeSite SiteScraper{..} = go where
     go posts | IS.null posts = return ()
     go posts = do
-        let id = IS.findMin posts
-        lift (tryScrape id) >>= S.yield
-        go $ IS.delete id posts
+        let i = IS.findMin posts
+        lift (tryScrape i) >>= S.yield
+        go $ IS.delete i posts
 
     tryScrape siteID = (scrapeID siteID >>= applyFilter) `catchB`
         \Err{..} -> return PostFailure{postSite = siteName, reason = errMsg, ..}
@@ -129,9 +128,8 @@ processSite s@SiteScraper{..} = do
     siteState <- query $ GetSite siteName
     siteRange <- idRange
 
-    let known   = scrapedMap siteState
-        new     = siteRange `IS.difference` known
-        threads = subdivide new [1 .. threadCount]
+    let known = scrapedMap siteState
+        new   = siteRange `IS.difference` known
 
     io.log siteName $ "Have: " ++ show (IS.size known)
                    ++    " / " ++ show (IS.size siteRange)
