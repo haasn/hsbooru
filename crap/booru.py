@@ -119,7 +119,11 @@ def showTags(mset, args):
         print('{0:10} {1}'.format(mset.get_termfreq(t), showTerm(t)))
 
 def count(mset, args):
-    print(mset.get_matches_estimated())
+    est = mset.get_matches_estimated()
+    if mset.get_matches_lower_bound() != mset.get_matches_upper_bound():
+        print("~" + str(est))
+    else:
+        print(est)
 
 commands = {
     'list': listFiles,
