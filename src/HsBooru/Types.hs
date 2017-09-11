@@ -22,7 +22,7 @@ module HsBooru.Types (
     , URL
     , fetchHTTP
     , BooruM(BooruM)
-    , Err(..)
+    , Err(..), ErrType(..)
     , err
     , runBooruM
     , ioEither
@@ -257,14 +257,15 @@ fetch :: Manager -> URL -> BooruM LBS.ByteString
 fetch mgr url = ask >>= \Ctx{..} -> retry retryCount $ do
     req <- liftIO $ parseRequest url
     res <- tryHttp $ httpLbs req mgr
-    let status = responseStatus res
+    let status  = responseStatus res
+        errType = if status == notFound404 then Permanent else Temporary
     unless (statusIsSuccessful status) $
-        throwB $ "Error downloading " ++ url ++ ": " ++ show status
+        throwB errType $ "Error downloading " ++ url ++ ": " ++ show status
     return $ responseBody res
   where tryHttp act = do
             res <- liftIO $ try act
             case res of
-                Left e  -> throwB $ show (e :: HttpException)
+                Left e  -> throwB Temporary $ show (e :: HttpException)
                 Right r -> return r
 
         retry 1 a = a
@@ -275,22 +276,23 @@ fetch mgr url = ask >>= \Ctx{..} -> retry retryCount $ do
 newtype BooruM a = BooruM { runBooruM_ :: ExceptT Err (ReaderT Context IO) a }
     deriving (Functor, Applicative, Monad, MonadIO, MonadReader Context)
 
-data Err = Err { errMsg :: String, errLoc :: CallStack }
+data ErrType = Permanent | Temporary deriving (Show, Eq)
+data Err = Err { errType :: ErrType, errMsg :: String, errLoc :: CallStack }
 
 instance Show Err where
     show Err{..} = unlines [ "Error: " ++ errMsg, prettyCallStack errLoc ]
 
-err :: HasCallStack => String -> Err
-err errMsg = Err { errLoc = callStack, .. }
+err :: HasCallStack => ErrType -> String -> Err
+err errType errMsg = Err { errLoc = callStack, .. }
 
 ioEither :: HasCallStack => IO (Either String a) -> BooruM a
-ioEither = either throwB pure <=< liftIO
+ioEither = either (throwB Temporary) pure <=< liftIO
 
 runBooruM :: Context -> BooruM a -> IO (Either Err a)
 runBooruM ctx = flip runReaderT ctx . runExceptT . runBooruM_
 
-throwB :: HasCallStack => String -> BooruM a
-throwB = BooruM . throwE . err
+throwB :: HasCallStack => ErrType -> String -> BooruM a
+throwB errType = BooruM . throwE . err errType
 
 catchB :: BooruM a -> (Err -> BooruM a) -> BooruM a
 catchB a h = BooruM $ runBooruM_ a `catchE` (runBooruM_ . h)
@@ -314,7 +316,8 @@ data Post
     -- | Post scrape was attempted and failed for some reason, included
     | PostFailure { siteID   :: Int
                   , postSite :: String
-                  , reason   :: String }
+                  , reason   :: String
+                  , failType :: ErrType }
     -- | Post scrape was successful but the file was confirmed to be deleted
     | PostDeleted { siteID   :: Int
                   , postSite :: String }
@@ -328,6 +331,7 @@ postState PostFailure{..} = def
 postState post = ScraperState . M.singleton (postSite post) $ case post of
     PostDeleted{..} -> deletedState siteID
     PostSuccess{..} -> successState siteID uploader
+    PostFailure{..} | failType == Permanent -> deletedState siteID
     _ -> def
 
 -- | A site-specific scraper definition

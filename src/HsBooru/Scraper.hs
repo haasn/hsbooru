@@ -37,7 +37,9 @@ scrapeSite SiteScraper{..} = go where
         go $ IS.delete i posts
 
     tryScrape siteID = (scrapeID siteID >>= applyFilter) `catchB`
-        \Err{..} -> return PostFailure{postSite = siteName, reason = errMsg, ..}
+        \Err{..} -> return PostFailure{postSite = siteName,
+                                       reason   = errMsg,
+                                       failType = errType, ..}
 
 applyFilter :: Post -> BooruM Post
 applyFilter p@PostSuccess{..} = withReturn $ \ret -> do
@@ -45,7 +47,7 @@ applyFilter p@PostSuccess{..} = withReturn $ \ret -> do
     -- When a post doesn't have enough tags, treat it as a failure - i.e. we
     -- will try scraping it again implicitly
     when (length tags < minTagCount) $
-        lift $ throwB "Post has too few tags"
+        lift $ throwB Temporary "Post has too few tags"
 
     -- When a post is white/blacklisted, treat it as a permanent failure -
     -- i.e. we won't try rescraping it until the user requests it
@@ -78,7 +80,8 @@ downloadImage :: Post -> BooruM Post
 downloadImage p@PostDeleted{}   = return p
 downloadImage p@PostFailure{}   = return p
 downloadImage p@PostSuccess{..} = tryDL `catchB` \Err{..} -> return
-                                    PostFailure{ reason = errMsg, ..}
+                                    PostFailure{reason   = errMsg,
+                                                failType = errType, ..}
     where tryDL = p <$ requireImage (T.unpack fileName) (T.unpack fileURL)
 
 

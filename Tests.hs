@@ -95,7 +95,7 @@ testContext init srv = do
 fakeFetch :: Server -> URL -> BooruM LBS.ByteString
 fakeFetch srv url = case find (\(u, _) -> u == url) srv of
     Just (_, res) -> return res
-    Nothing       -> throwB $ "URL `" ++ url ++ "` not found in testContext!"
+    Nothing       -> throwB Permanent $ "URL `" ++ url ++ "` not found in testContext!"
 
 runBooruWith :: ScraperState -> Server -> BooruM a -> IO a
 runBooruWith init srv act = do

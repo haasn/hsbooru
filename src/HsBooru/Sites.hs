@@ -42,7 +42,7 @@ scrape url s = do
     Ctx{..} <- ask
     when verbose $ io.log "http" $ "Attempting to scrape " ++ url
     body <- decodeUtf8 <$> fetchURL url
-    maybe (throwB "Scraper returned no results") return $
+    maybe (throwB Temporary "Scraper returned no results") return $
         scrapeStringLike body s
 
 -- | List of supported website scrapers
@@ -76,7 +76,8 @@ gelbooru = SiteScraper{..}
                 return $ case res of
                     (1, Just p)  -> p
                     (0, Nothing) -> PostDeleted{..}
-                    (_, _)       -> PostFailure{reason = "Unknown failure", ..}
+                    (_, _)       -> PostFailure{reason   = "Unknown failure",
+                                                failType = Temporary, ..}
 
           scrapePost = do
                 let post = "post"
