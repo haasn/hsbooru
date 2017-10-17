@@ -85,7 +85,7 @@ gelbooru = SiteScraper{..}
                 uploader <- attrRead "creator_id" post <|> pure 0
                 score    <- attrRead "score" post
                 tags     <- attrText "tags" post <&> T.words
-                fileURL  <- ("http:" <>) <$> attrText "file_url" post
+                fileURL  <- fixURL <$> attrText "file_url" post
                 rating   <- attr "rating" post >>= \case
                                 "s" -> pure Safe
                                 "q" -> pure Questionable
@@ -104,3 +104,6 @@ gelbooru = SiteScraper{..}
                 let fileName = T.pack $ takeFileName (T.unpack fileURL)
 
                 return PostSuccess{..}
+
+          fixURL url | "http:" `T.isPrefixOf` url = url
+                     | otherwise = "http:" <> url
