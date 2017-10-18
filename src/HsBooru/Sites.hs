@@ -105,5 +105,5 @@ gelbooru = SiteScraper{..}
 
                 return PostSuccess{..}
 
-          fixURL url | "http:" `T.isPrefixOf` url = url
+          fixURL url | "http" `T.isPrefixOf` url = url
                      | otherwise = "http:" <> url
