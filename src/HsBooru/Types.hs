@@ -125,9 +125,8 @@ instance Migrate SiteState where
               authorMap  = IS.empty
               knownMap   = IS.empty
 
-instance Monoid SiteState where
-    mempty = def
-    mappend (SiteState sa pa aa ka) (SiteState sb pb ab kb) = SiteState{..}
+instance Semigroup SiteState where
+    SiteState sa pa aa ka <> SiteState sb pb ab kb = SiteState{..}
         where scrapedMap = IS.union sa sb
               presentMap = IS.union pa pb
               authorMap  = IS.union aa ab
@@ -135,6 +134,9 @@ instance Monoid SiteState where
 
 instance Default SiteState where
     def = SiteState IS.empty IS.empty IS.empty IS.empty
+
+instance Monoid SiteState where
+    mempty = def
 
 -- | Arguments: scrapedMap, presentMap, authorMap, knownMap.
 -- The superset invariants are enforced
@@ -188,6 +190,9 @@ splitIS ps = (fix left, right)
 -- Can't be a newtype due to overly strict nominal role constraints on SafeCopy
 newtype ScraperState = ScraperState { scraperState :: M.Map String SiteState }
     deriving Show
+
+instance Semigroup ScraperState where
+    ScraperState a <> ScraperState b = ScraperState $ M.unionWith (<>) a b
 
 instance Monoid ScraperState where
     mempty = ScraperState mempty
