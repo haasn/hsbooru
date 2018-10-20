@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP, BangPatterns #-}
 module HsBooru.Stats
-    -- * Post statistics
-    ( PostStats(..)
+    ( -- * Post statistics
+      PostStats(..)
     , showPostStats
     , postStats
     -- * Site statistics
